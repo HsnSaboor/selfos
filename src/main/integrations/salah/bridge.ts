@@ -34,6 +34,8 @@ export interface SalahTimes {
   source: "salah-ctl" | "computed";
   location: string;
   hijri: string;
+  /** Sunrise (HH:MM) closing Fajr's on-time window; computed when absent. */
+  sunrise?: string;
   prayers: PrayerSlot[];
   /** The prayer whose window is currently open, if any. */
   current: PrayerId | null;
@@ -91,6 +93,9 @@ export function parseStatus(raw: unknown): SalahTimes | null {
     source: "salah-ctl",
     location: typeof s.location === "string" ? s.location : "",
     hijri: typeof s.hijri === "string" ? s.hijri : "",
+    ...(typeof (s as { sunrise?: unknown }).sunrise === "string"
+      ? { sunrise: (s as { sunrise: string }).sunrise }
+      : {}),
     prayers,
     current:
       typeof currentId === "string" && PRAYERS.includes(currentId as PrayerId)

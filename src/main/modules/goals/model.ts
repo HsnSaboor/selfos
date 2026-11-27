@@ -5,6 +5,7 @@
  * on screen can be reproduced from the same inputs in a test (product model
  * P-3, STACK §11).
  */
+import { isDateKey } from "../../../shared/dates";
 
 export type GoalKind = "numeric" | "milestone" | "quota";
 export type GoalStatus = "active" | "completed" | "abandoned";
@@ -81,11 +82,9 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / MS_PER_DAY);
 }
 
-export function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+import { addDays } from "../../../shared/dates";
+
+export { addDays };
 
 /** Completed milestones over total; a goal with no milestones has no progress. */
 export function milestoneValue(milestones: MilestoneRow[]): { done: number; total: number } {
@@ -209,11 +208,13 @@ export function validateGoalInput(input: Partial<GoalInput>): GoalInput {
   }
 
   const startDate = typeof input.startDate === "string" ? input.startDate : "";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("startDate must be YYYY-MM-DD");
+  // isDateKey, not a shape regex: "2026-13-45" passes the regex and then makes
+  // every pace figure NaN (round-13).
+  if (!isDateKey(startDate)) throw new Error("startDate must be a real YYYY-MM-DD date");
 
   const targetDate = input.targetDate ?? null;
   if (targetDate !== null) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) throw new Error("targetDate must be YYYY-MM-DD");
+    if (!isDateKey(targetDate)) throw new Error("targetDate must be a real YYYY-MM-DD date");
     if (daysBetween(startDate, targetDate) < 0) throw new Error("targetDate is before startDate");
   }
 

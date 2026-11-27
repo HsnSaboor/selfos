@@ -127,6 +127,7 @@ export function computeTimes(config: SalahConfig, now: Date): SalahTimes {
     // calendar by a day at some dates. The source field tells the UI which
     // convention is in play.
     hijri: formatHijri(now),
+    sunrise: hm(today.sunrise),
     prayers,
     current,
     next,

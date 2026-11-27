@@ -54,7 +54,12 @@ export class SalahService {
   /** Last Hijri date seen from the external stack, for other modules to reuse. */
   lastHijri(): { value: string | null; source: "salah-ctl" | "computed" } {
     const cached = this.#cachedTimes;
-    if (!cached) return { value: null, source: "computed" };
+    // Resolve locally when nothing has run yet: the dashboard must show the same
+    // date whether or not the Salah screen was opened first (round-13).
+    if (!cached) {
+      const times = computeTimes(this.config(), new Date());
+      return { value: times.hijri || null, source: "computed" };
+    }
     return { value: cached.times.hijri || null, source: cached.times.source };
   }
 
@@ -88,17 +93,32 @@ export class SalahService {
     const starts = {} as Record<PrayerId, string>;
     for (const p of times.prayers) starts[p.id] = p.time;
     const config = this.config();
-    const sunrise = config.customTimes.sunrise ?? sunriseFor(config, new Date());
+    // Sunrise comes from the same computation as the prayers; a second adhan
+    // configuration here could disagree, and its old fallback invented 06:00,
+    // which decides Fajr's on-time boundary (round-13).
+    const sunrise = times.sunrise ?? config.customTimes.sunrise ?? "06:00";
     return { starts, sunrise, fajrTomorrow: starts.fajr };
+  }
+
+  /** Times for a specific local date (noon is enough for the astronomy). */
+  private timesFor(date: string): SalahTimes {
+    return computeTimes(this.config(), new Date(`${date}T12:00:00`));
+  }
+
+  /** Windows for a specific local date, from that date's own astronomy. */
+  windowsFor(date: string): PrayerWindows {
+    return this.windows(this.timesFor(date));
   }
 
   async day(localDate?: string, now = new Date()): Promise<SalahDay> {
     const date = localDate ?? localDateKey(now);
-    const times = await this.times(now);
+    const isToday = date === localDateKey(now);
+    // A past day is judged with that day's own times and a fully elapsed clock,
+    // not with today's windows at today's minute (round-13).
+    const times = isToday ? await this.times(now) : this.timesFor(date);
     const windows = this.windows(times);
     const logs = this.logsFor(date);
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const isToday = date === localDateKey(now);
+    const nowMinutes = isToday ? now.getHours() * 60 + now.getMinutes() : 24 * 60;
 
     // A past day is fully settled; today is settled only up to now.
     const state = buildDayState(date, windows, logs, isToday ? nowMinutes : 24 * 60);
@@ -127,12 +147,14 @@ export class SalahService {
     if (!PRAYERS.includes(prayer)) throw new Error(`unknown prayer: ${prayer}`);
     const now = opts.now ?? new Date();
     const date = opts.localDate ?? localDateKey(now);
-    const times = await this.times(now);
+    const isToday = date === localDateKey(now);
+    const times = isToday ? await this.times(now) : this.timesFor(date);
     const windows = this.windows(times);
     const slot = times.prayers.find((p) => p.id === prayer);
     if (!slot) throw new Error(`prayer ${prayer} missing from schedule`);
 
-    const status = opts.status ?? classifyLog(prayer, now.getHours() * 60 + now.getMinutes(), windows);
+    const status =
+      opts.status ?? classifyLog(prayer, isToday ? now.getHours() * 60 + now.getMinutes() : 24 * 60, windows);
 
     // Read the previous status first: qada debt is a *transition* ledger.
     // Adding +1 on every `missed` log made a repeated log double the debt, and
@@ -179,14 +201,15 @@ export class SalahService {
     if (existing?.status === "missed") this.addQada(prayer, -1, localDate);
   }
 
+  /** Current qada debt (read path used by the service's own tests). */
+  qada(): QadaSummary {
+    return qadaDebt(this.qadaEvents());
+  }
+
   /** Record a make-up of a previously missed prayer. */
   repayQada(prayer: PrayerId, count = 1, localDate?: string): QadaSummary {
     if (!PRAYERS.includes(prayer)) throw new Error(`unknown prayer: ${prayer}`);
     this.addQada(prayer, -Math.abs(count), localDate ?? localDateKey(new Date()));
-    return qadaDebt(this.qadaEvents());
-  }
-
-  qada(): QadaSummary {
     return qadaDebt(this.qadaEvents());
   }
 
@@ -282,19 +305,4 @@ export class SalahService {
   }
 }
 
-/** Sunrise is needed to close Fajr's window; take it from the computed times. */
-function sunriseFor(config: SalahConfig, now: Date): string {
-  try {
-    const { PrayerTimes, Coordinates, CalculationMethod, Madhab } =
-      require("adhan") as typeof import("adhan");
-    const params = CalculationMethod.Karachi();
-    params.madhab = config.asrSchool === "hanafi" ? Madhab.Hanafi : Madhab.Shafi;
-    const t = new PrayerTimes(new Coordinates(config.latitude, config.longitude), now, params);
-    return `${String(t.sunrise.getHours()).padStart(2, "0")}:${String(t.sunrise.getMinutes()).padStart(2, "0")}`;
-  } catch {
-    return "06:00";
-  }
-}
-
 export type { PrayerId, PrayerSlot };
-export { PRAYER_LABELS, PRAYERS };

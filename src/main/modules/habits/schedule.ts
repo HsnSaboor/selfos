@@ -42,12 +42,9 @@ export function monthStart(dateKey: string): string {
   return `${dateKey.slice(0, 7)}-01`;
 }
 
-export function addDays(dateKey: string, days: number): string {
-  const [y, m, d] = dateKey.split("-").map(Number) as [number, number, number];
-  const base = new Date(Date.UTC(y, m - 1, d));
-  base.setUTCDate(base.getUTCDate() + days);
-  return base.toISOString().slice(0, 10);
-}
+import { addDays } from "../../../shared/dates";
+
+export { addDays };
 
 export function compareDateKeys(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EntryStatus, HabitView, HeatmapCell, NewHabitInput, Result } from "../../../shared/api";
+import { addDays } from "../../../shared/dates";
+import { isComplete } from "../../../shared/habits";
 import { describeSchedule, isoWeekday, WEEKDAY_LABELS } from "../../../shared/schedule";
 
 function statusLabel(h: HabitView): string {
@@ -22,11 +24,6 @@ function statusLabel(h: HabitView): string {
 function pluralUnit(n: number, unit: "days" | "weeks" | "months"): string {
   if (n === 1) return unit.slice(0, -1);
   return unit;
-}
-
-function isComplete(h: HabitView): boolean {
-  const s = h.todayEntry?.status;
-  return s === "done" || s === "clean";
 }
 
 function Heatmap({ cells }: { cells: HeatmapCell[] }) {
@@ -90,7 +87,7 @@ function HabitRow({
   onSlip: () => void;
   onArchive: () => void;
 }) {
-  const complete = isComplete(habit);
+  const complete = isComplete(habit, habit.todayEntry);
   const countish = habit.kind === "count" || habit.kind === "duration";
 
   return (
@@ -305,6 +302,10 @@ export function HabitsView({ localDate }: { localDate: string }) {
   const [heatmaps, setHeatmaps] = useState<Record<number, HeatmapCell[]>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // F-HABIT-10: backfill a past day. The service and handler were always
+  // date-parameterised; only the screen had no date control.
+  const [entryDate, setEntryDate] = useState(localDate);
+  useEffect(() => setEntryDate(localDate), [localDate]);
 
   /**
    * Sequence guard: `localDate` changes underneath this loader on the App's 30 s
@@ -353,7 +354,7 @@ export function HabitsView({ localDate }: { localDate: string }) {
   const active = habits.filter((h) => h.archivedAt === null || h.archivedAt === undefined);
   const archived = habits.filter((h) => h.archivedAt !== null && h.archivedAt !== undefined);
   const due = active.filter((h) => h.dueToday);
-  const done = due.filter(isComplete).length;
+  const done = due.filter((h) => isComplete(h, h.todayEntry)).length;
 
   return (
     <div className="habits">
@@ -388,6 +389,21 @@ export function HabitsView({ localDate }: { localDate: string }) {
 
       <NewHabitForm onCreated={() => void load()} />
 
+      <div className="form-row">
+        <label className="check">
+          <input
+            type="date"
+            className="input"
+            value={entryDate}
+            min={addDays(localDate, -29)}
+            max={localDate}
+            onChange={(e) => setEntryDate(e.target.value || localDate)}
+            aria-label="Entry date (backfill up to 30 days)"
+          />
+          Entry date (backfill)
+        </label>
+      </div>
+
       <div className="habit-list">
         {active.length === 0 ? (
           <div className="empty">No habits yet. Add one above to start a streak.</div>
@@ -399,18 +415,20 @@ export function HabitsView({ localDate }: { localDate: string }) {
               habit={h}
               busy={busyId === h.id}
               onToggle={() =>
-                void act(h.id, () => window.selfos.invoke("habits.toggle", { habitId: h.id, localDate }))
+                void act(h.id, () =>
+                  window.selfos.invoke("habits.toggle", { habitId: h.id, localDate: entryDate }),
+                )
               }
               onIncrement={(d) =>
                 void act(h.id, () =>
-                  window.selfos.invoke("habits.increment", { habitId: h.id, delta: d, localDate }),
+                  window.selfos.invoke("habits.increment", { habitId: h.id, delta: d, localDate: entryDate }),
                 )
               }
               onSkip={() =>
                 void act(h.id, () =>
                   window.selfos.invoke("habits.log", {
                     habitId: h.id,
-                    localDate,
+                    localDate: entryDate,
                     status: "skipped" as EntryStatus,
                   }),
                 )
@@ -419,7 +437,7 @@ export function HabitsView({ localDate }: { localDate: string }) {
                 void act(h.id, () =>
                   window.selfos.invoke("habits.log", {
                     habitId: h.id,
-                    localDate,
+                    localDate: entryDate,
                     status: "slipped" as EntryStatus,
                   }),
                 )

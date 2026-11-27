@@ -6,7 +6,7 @@
  * closing it keeps history (F-GOAL-07).
  */
 
-import { localDateKey } from "../../../shared/dates";
+import { isDateKey, localDateKey } from "../../../shared/dates";
 import type { Db } from "../../db/driver";
 import {
   computePace,
@@ -125,7 +125,8 @@ export class GoalsService {
     if (!title) throw new Error("title is required");
     const targetDate = patch.targetDate === undefined ? row.target_date : patch.targetDate;
     if (targetDate !== null) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) throw new Error("targetDate must be YYYY-MM-DD");
+      // isDateKey, as in validateGoalInput: the shape regex accepts 2026-13-45.
+      if (!isDateKey(targetDate)) throw new Error("targetDate must be a real YYYY-MM-DD date");
       if (targetDate < row.start_date) throw new Error("targetDate is before startDate");
     }
     if (patch.targetValue !== undefined && patch.targetValue !== null) {
@@ -326,7 +327,10 @@ export class GoalsService {
       rollup:
         childViews.length > 0
           ? rollupFraction(
-              childViews.map((c) => ({ fraction: c.pace.fraction, hasTarget: c.target !== null })),
+              childViews.map((c) => ({
+                fraction: c.rollup ?? c.pace.fraction,
+                hasTarget: c.target !== null,
+              })),
             )
           : null,
       childCount: childViews.length,

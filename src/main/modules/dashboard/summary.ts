@@ -8,6 +8,7 @@
  * mean.
  */
 import type { DaySummary, HabitView } from "../../../shared/api";
+import { isComplete } from "../../../shared/habits";
 
 export interface DayAggregateRow {
   screen_seconds: number;
@@ -42,9 +43,7 @@ export interface DaySummaryInput {
  */
 export function summarizeDay(input: DaySummaryInput): DaySummary {
   const dueToday = input.habitStates.filter((h) => h.dueToday);
-  const done = dueToday.filter(
-    (h) => h.todayEntry?.status === "done" || h.todayEntry?.status === "clean",
-  ).length;
+  const done = dueToday.filter((h) => isComplete(h, h.todayEntry)).length;
   const bestStreak = input.habitStates.reduce((max, h) => Math.max(max, h.streak.current), 0);
   const agg = input.agg;
 

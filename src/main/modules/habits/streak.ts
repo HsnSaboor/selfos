@@ -18,6 +18,8 @@
  *
  * Pure functions; all dates are local_date strings (YYYY-MM-DD).
  */
+import { dayCount } from "../../../shared/dates";
+import { isComplete } from "../../../shared/habits";
 import {
   addDays,
   compareDateKeys,
@@ -44,23 +46,9 @@ export interface HabitDefinition {
   target: number | null;
 }
 
-/** Did this single day count as success? */
+/** Did this single day count as success? One rule, shared with the UI. */
 export function daySatisfies(habit: HabitDefinition, entry: HabitEntry | undefined): boolean {
-  if (!entry) return false;
-  switch (habit.kind) {
-    case "boolean":
-      return entry.status === "done";
-    case "count":
-    case "duration": {
-      const target = habit.target ?? 1;
-      if (entry.status === "done") return true;
-      if (entry.status === "partial") return entry.value >= target;
-      return entry.value >= target;
-    }
-    case "avoid":
-      // Avoidance habits succeed on a clean day; a slip is the failure.
-      return entry.status === "clean" || entry.status === "done";
-  }
+  return isComplete(habit, entry);
 }
 
 export type DayState = "satisfied" | "failed" | "neutral" | "pending";
@@ -276,9 +264,9 @@ export function heatmapDays(input: StreakInput, days: number): Array<{ date: str
     (min, e) => (compareDateKeys(e.localDate, min) < 0 ? e.localDate : min),
     today,
   );
-  // Clamp: the renderer supplies this number, and an unbounded value allocates
-  // an array of that size on the main process.
-  const span = Math.min(366, Math.max(1, Math.trunc(Number.isFinite(days) ? days : 84)));
+  // One clamp, in shared/dates: the renderer supplies this number and an
+  // unbounded value allocates an array of that size on the main process.
+  const span = dayCount(days, 84);
   const out: Array<{ date: string; state: DayState }> = [];
   for (let i = span - 1; i >= 0; i--) {
     const d = addDays(today, -i);

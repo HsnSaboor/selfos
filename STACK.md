@@ -615,7 +615,7 @@ Every row carries `source` (`history` vs `window-title`) so the UI can show prov
 ### 5.5 Scheduler
 
 - Reminders (habits, prayer logging prompts) run in the main process with a 30 s tick and fire **at most once per slot per day**, tracked in a small table.
-- Notifications go through Electron's `Notification` API, or `omarchy-notification-send` / `notify-send` when a richer payload is needed (both verified installed).
+- Reminders/notifications (F-HABIT-11) are **not implemented in v1**: there is no scheduler and no `Notification` call. The mechanism (Electron `Notification`, or `omarchy-notification-send` / `notify-send`, both verified installed) is recorded for when the component is built.
 - No wake-from-suspend timers: the existing `salah-daemon` already owns that; SelfOS must not create competing system timers (F-SALAH-09).
 
 ---
@@ -683,7 +683,7 @@ Re-anchoring on load, in order:
   - `streak(habitId, entries, schedules, today)` → `{ current, longest, unit }`, honoring skips (F-HABIT-06/07/08).
   - `completionRate(habitId, range)`.
 - **Backfill** writes a normal `habit_entry` with `created_at` = now and `local_date` = the target day; no separate model (F-HABIT-10).
-- **Linked habits** are resolved at aggregation time: a habit with `source='linked:reading'` reads `reading_session` for the day and writes a derived `habit_entry` (`source='linked:reading'`), which is overwritten on recompute (never manually edited).
+- **Linked habits** (`source='linked:reading'`) are **not implemented in v1**: the column exists, no code writes or reads it. The paragraph that described aggregation-time resolution was removed with the component.
 - Streaks are never stored; they are computed per render from a day-indexed query (D-03).
 
 ---

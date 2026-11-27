@@ -393,7 +393,7 @@ function NewGoalForm({
           >
             <option value="">None</option>
             {goals
-              .filter((g) => g.parentId === null)
+              .filter((g) => g.status === "active")
               .map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.title}

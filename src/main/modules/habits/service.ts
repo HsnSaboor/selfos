@@ -4,6 +4,9 @@
  * Streak math lives in `streak.ts` and is pure; this file only loads rows and
  * delegates. Nothing here stores a streak — it is always recomputed (D-03).
  */
+
+import { addDays } from "../../../shared/dates";
+import { isComplete } from "../../../shared/habits";
 import type { Db } from "../../db/driver";
 import {
   isoWeekday,
@@ -57,13 +60,6 @@ export interface NewHabit {
   };
 }
 
-function previousDay(dateKey: string): string {
-  const [y, m, d] = dateKey.split("-").map(Number) as [number, number, number];
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() - 1);
-  return dt.toISOString().slice(0, 10);
-}
-
 export class HabitsService {
   #db: Db;
 
@@ -89,7 +85,7 @@ export class HabitsService {
         todayEntry,
         streak: computeStreak({ habit, versions, entries, today }),
         completion30d: completionRate({ habit, versions, entries, today, lookbackDays: 30 }),
-        dueToday: this.#isDueToday(schedule, today, entries),
+        dueToday: this.#isDueToday(habit, schedule, today, entries),
       };
     });
   }
@@ -264,29 +260,19 @@ export class HabitsService {
    * number of habits (N+1 over IPC). Each habit's schedule and entry rows are
    * still read once, but the whole set crosses the boundary in one call.
    */
-  heatmaps(today: string, days: number): Record<number, ReturnType<typeof heatmapDays>> {
+  heatmaps(
+    today: string,
+    days: number,
+    includeArchived = false,
+  ): Record<number, ReturnType<typeof heatmapDays>> {
     const out: Record<number, ReturnType<typeof heatmapDays>> = {};
-    // Archived habits are included: the screen shows them under a toggle, and
-    // the previous `this.list(today)` (without `includeArchived`) silently
-    // omitted their heatmaps.
-    for (const { habit, versions, entries } of this.#load(true)) {
+    // Archived habits are excluded by default: the screen renders name +
+    // restore only, so computing 84 classifyDay calls per archived habit and
+    // crossing IPC with them was pure waste (round-13).
+    for (const { habit, versions, entries } of this.#load(includeArchived)) {
       out[habit.id] = heatmapDays({ habit, versions, entries, today }, days);
     }
     return out;
-  }
-
-  detail(habitId: number, today: string) {
-    const habit = this.#definition(habitId);
-    const versions = this.schedules(habitId);
-    const entries = this.entries(habitId);
-    return {
-      habit,
-      versions,
-      entries,
-      streak: computeStreak({ habit, versions, entries, today }),
-      completion30d: completionRate({ habit, versions, entries, today, lookbackDays: 30 }),
-      heatmap: heatmapDays({ habit, versions, entries, today }, 84),
-    };
   }
 
   // ── row loading ───────────────────────────────────────────────────────
@@ -340,36 +326,31 @@ export class HabitsService {
   }
 
   #insertSchedule(habitId: number, s: NewHabit["schedule"], effectiveFrom: string): void {
-    // `habit_schedule` is unique on (habit_id, effective_from). Changing the
-    // schedule on the same day the habit was created would otherwise overwrite
-    // the original version and silently rewrite history (D-08). Preserve the
-    // existing version by moving it one day earlier before inserting.
-    const existing = this.#db.get<{ id: number }>(
-      "SELECT id FROM habit_schedule WHERE habit_id = ? AND effective_from = ?",
-      habitId,
-      effectiveFrom,
-    );
-    if (existing) {
-      const priorDay = previousDay(effectiveFrom);
-      const occupied = this.#db.get<{ id: number }>(
+    // `habit_schedule` is unique on (habit_id, effective_from). A version is
+    // immutable: changing a schedule that already has a version for today takes
+    // effect **tomorrow**, so no past day is reinterpreted (D-08). The old
+    // implementation moved the previous version one day earlier, which rewrote
+    // the previous day instead, and a second same-day change fell through to
+    // `ON CONFLICT … DO UPDATE` and overwrote today's version (round-13).
+    let from = effectiveFrom;
+    const occupied = (date: string) =>
+      this.#db.get<{ id: number }>(
         "SELECT id FROM habit_schedule WHERE habit_id = ? AND effective_from = ?",
         habitId,
-        priorDay,
+        date,
       );
-      if (!occupied) {
-        this.#db.run("UPDATE habit_schedule SET effective_from = ? WHERE id = ?", priorDay, existing.id);
-      }
+    if (occupied(from)) {
+      from = addDays(from, 1);
+      // A future version may already sit on that date; keep walking so no
+      // version is ever overwritten (bounded, the calendar is finite).
+      for (let i = 0; i < 7 && occupied(from); i++) from = addDays(from, 1);
     }
 
     this.#db.run(
       `INSERT INTO habit_schedule (habit_id, effective_from, kind, weekdays, times_per_period, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(habit_id, effective_from) DO UPDATE SET
-         kind = excluded.kind,
-         weekdays = excluded.weekdays,
-         times_per_period = excluded.times_per_period`,
+       VALUES (?, ?, ?, ?, ?, ?)`,
       habitId,
-      effectiveFrom,
+      from,
       s.kind,
       s.weekdays?.length ? s.weekdays.join(",") : null,
       s.timesPerPeriod ?? null,
@@ -377,7 +358,12 @@ export class HabitsService {
     );
   }
 
-  #isDueToday(schedule: ScheduleVersion | null, today: string, entries: HabitEntry[]): boolean {
+  #isDueToday(
+    habit: HabitDefinition,
+    schedule: ScheduleVersion | null,
+    today: string,
+    entries: HabitEntry[],
+  ): boolean {
     if (!schedule) return false;
     if (schedule.kind === "daily") return true;
     if (schedule.kind === "weekdays") {
@@ -387,9 +373,7 @@ export class HabitsService {
     const needed = schedule.timesPerPeriod ?? 1;
     const currentPeriod = periodKeyFor(schedule, today);
     const done = entries.filter(
-      (e) =>
-        (e.status === "done" || e.status === "clean") &&
-        periodKeyFor(schedule, e.localDate) === currentPeriod,
+      (e) => isComplete(habit, e) && periodKeyFor(schedule, e.localDate) === currentPeriod,
     ).length;
     return done < needed;
   }

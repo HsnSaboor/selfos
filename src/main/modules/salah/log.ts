@@ -12,7 +12,7 @@
  *  - Explicitly excused (travel/illness)→ `excused`, never debt
  *  - A missed prayer adds qada debt; a make-up repayment subtracts it.
  */
-import type { PrayerId } from "../../integrations/salah/bridge";
+import { PRAYERS, type PrayerId } from "../../integrations/salah/bridge";
 
 export type PrayerStatus = "on_time" | "late" | "missed" | "excused";
 
@@ -79,7 +79,7 @@ export function classifyLog(prayer: PrayerId, loggedAtMinutes: number, windows: 
 
 /** Minute-of-day at which this prayer's window closes. */
 export function windowEnd(prayer: PrayerId, windows: PrayerWindows): number {
-  const order: PrayerId[] = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+  const order: readonly PrayerId[] = PRAYERS;
   // Fajr ends at sunrise, which is not itself a prayer.
   if (prayer === "fajr") {
     return minutesOf(windows.sunrise ?? windows.starts.dhuhr);
@@ -96,7 +96,7 @@ export function windowEnd(prayer: PrayerId, windows: PrayerWindows): number {
  * simply unlogged and must not create qada debt.
  */
 export function settledPrayers(nowMinutes: number, windows: PrayerWindows): PrayerId[] {
-  const order: PrayerId[] = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+  const order: readonly PrayerId[] = PRAYERS;
   return order.filter((p) => {
     const end = windowEnd(p, windows);
     if (p === "isha" && end < minutesOf(windows.starts.isha)) return nowMinutes >= end + 1440;
@@ -143,7 +143,7 @@ export function buildDayState(
   logs: PrayerLog[],
   nowMinutes: number,
 ): PrayerDayState {
-  const order: PrayerId[] = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+  const order: readonly PrayerId[] = PRAYERS;
   const byPrayer = new Map(logs.map((l) => [l.prayer, l]));
   const settled = new Set(settledPrayers(nowMinutes, windows));
 
