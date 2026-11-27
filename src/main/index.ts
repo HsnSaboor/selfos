@@ -155,6 +155,9 @@ function createWindow(): BrowserWindow {
     show: false,
     backgroundColor: "#1e1e1e",
     title: "SelfOS",
+    icon: existsSync(join(__dirname, "../../build/icon.png"))
+      ? join(__dirname, "../../build/icon.png")
+      : undefined,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
@@ -176,6 +179,11 @@ function createWindow(): BrowserWindow {
   } else if (!startHidden) {
     win.once("ready-to-show", () => win.show());
   }
+  win.webContents.on("render-process-gone", (_e, details) => {
+    // A renderer crash must not leave a blank window; reload unless the
+    // renderer is gone for a clean shutdown.
+    if (!details.reason.includes("clean")) win.reload();
+  });
   win.on("close", (event) => {
     if (quitting) return;
     event.preventDefault();
@@ -380,7 +388,12 @@ function registerAppProtocol(): void {
     const rel = pathname === "/" || pathname === "" ? "index.html" : pathname.replace(/^\/+/, "");
     // Serve only from the built renderer directory (which includes pdfjs/, so
     // the worker shares this origin).
-    const root = resolve(__dirname, "../renderer");
+    // In a packaged build the pdf.js assets are extraResources, not inside
+    // app.asar: a Worker cannot be loaded from an archive.
+    const root =
+      app.isPackaged && rel.startsWith("pdfjs/")
+        ? join(process.resourcesPath, "pdfjs")
+        : resolve(__dirname, "../renderer");
     const file = resolve(root, rel);
     // `startsWith(root)` accepts a sibling such as `../renderer-extra`; the
     // notes vault already uses resolve + relative for exactly this reason.
@@ -429,6 +442,15 @@ if (!gotLock) {
       app.on("will-quit", stopThemeWatch);
 
       app.on("activate", showWindow);
+
+      // G5/N-REL: a main-process exception must not leave a silent zombie.
+      process.on("uncaughtException", (err) => {
+        console.error("[selfos] uncaught exception:", err);
+        dialog.showErrorBox("SelfOS hit an unexpected error", String(err?.stack ?? err));
+      });
+      process.on("unhandledRejection", (reason) => {
+        console.error("[selfos] unhandled rejection:", reason);
+      });
     } catch (err) {
       const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
       console.error("[selfos] startup failed:", message);

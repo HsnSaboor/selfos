@@ -162,6 +162,17 @@ spike-anchors:
 spike-hyprland seconds="25":
     bun spikes/sp3-hyprland.cjs --seconds={{seconds}}
 
+# Package a distributable (AppImage + deb). Requires `bun install`.
+dist: build
+    bunx electron-builder --linux AppImage deb
+
+# Remove the autostart entry and local data (asks first).
+uninstall:
+    @echo "This removes ~/.config/autostart/selfos.desktop and the SelfOS data folder."
+    rm -f ~/.config/autostart/selfos.desktop
+    rm -rf ~/.config/SelfOS
+    @echo "uninstalled"
+
 # ── maintenance ───────────────────────────────────────────────────────────
 
 # Show app data location and size

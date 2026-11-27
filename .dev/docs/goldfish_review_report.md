@@ -2546,3 +2546,17 @@ Reviewers: `design_critic` (pending), `codebase_details` (4 Blockers, 8 Majors,
 | verifiers | all green; M1 skipped |
 
 **Round 19 reviewer status:** codebase_details + zoom_out reported; design_critic pending. Not clean.
+
+## Round 19 — design_critic addendum
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 366 | BLOCKER | No packaging toolchain at all | FIXED — electron-builder.yml, `just dist`, pinned devDependency, AppImage+deb, pdfjs as extraResources |
+| 367 | MAJOR | Packaged pdf.js worker would live inside app.asar | FIXED — protocol serves pdfjs from `process.resourcesPath` when packaged |
+| 368 | MAJOR | No app/window icon set | FIXED — 512 build/icon.png, window icon, tray asset |
+| 369 | MAJOR | No uncaughtException/unhandledRejection/render-process-gone handling | FIXED |
+| 370 | MAJOR | No uninstall path | FIXED — `just uninstall` |
+| 371 | MAJOR | No upgrade procedure documented | FIXED — README section |
+| 372 | NIT | README feature-complete/nine-green claims | FIXED (previous pass) |
+
+**Round 19 now: all three reviewers reported; not clean at review time; all findings applied.**

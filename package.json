@@ -11,7 +11,8 @@
     "lint": "biome check src tests",
     "fmt": "biome format --write src tests",
     "test": "just test",
-    "check": "just check"
+    "check": "just check",
+    "dist": "bunx electron-builder --linux AppImage deb"
   },
   "keywords": [],
   "type": "module",
@@ -27,7 +28,8 @@
     "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "electron-builder": "26.0.12"
   },
   "dependencies": {
     "adhan": "^4.4.6",

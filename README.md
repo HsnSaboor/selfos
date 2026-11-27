@@ -112,3 +112,14 @@ src/
   shared/      typed IPC contract shared by all three contexts
 spikes/        verification harnesses + results
 ```
+
+## Packaging, update and uninstall
+
+```bash
+just dist        # AppImage + deb into release/ (needs `bun install` first)
+just uninstall   # removes the autostart entry and ~/.config/SelfOS
+```
+
+There is no auto-updater: upgrade by installing the new package over the old
+one (the database is forward-migrated, with a pre-migration copy beside it).
+Electron majors are the migration trigger; the supported window is three majors.

@@ -1,0 +1,18 @@
+# Packaging (STACK §12, decision #12). Run `just dist`.
+appId: dev.selfos.app
+productName: SelfOS
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: out/renderer/pdfjs
+    to: pdfjs
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  icon: build/icon.png
