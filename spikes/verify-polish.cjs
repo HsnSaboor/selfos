@@ -52,9 +52,16 @@ app.whenReady().then(async () => {
   // ── backups ───────────────────────────────────────────────────────────
   const before = await call("backup.status", undefined);
   step("backup-status", before.ok, before.ok ? `${before.data.files.length} existing` : before.error);
-  // The app takes today's backup at startup.
-  step("startup-backup-ran", before.ok && before.data.files.some((f) => f.kind === "daily"),
-    before.ok ? before.data.files.map((f) => f.name).join(", ") : "");
+  // The app takes today's backup at startup, deferred behind first paint so a
+  // VACUUM INTO cannot block the window. Poll for it rather than assuming it
+  // has already happened.
+  let daily = before.ok && before.data.files.some((f) => f.kind === "daily");
+  for (let i = 0; i < 20 && !daily; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const again = await call("backup.status", undefined);
+    daily = again.ok && again.data.files.some((f) => f.kind === "daily");
+  }
+  step("startup-backup-ran", daily, "daily backup present after the deferred startup run");
 
   const made = await call("backup.create", { kind: "manual" });
   step("manual-backup", made.ok && made.data.bytes > 0, made.ok ? `${made.data.name} (${made.data.bytes} bytes)` : made.error);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ActivityCellView,
   AnalyticsView as AnalyticsData,
   DayPointView,
   DomainUsageView,
@@ -9,6 +10,7 @@ import { formatDuration, formatShortDate } from "../../../shared/format";
 import { Kpi } from "./Kpi";
 
 const RANGES = [7, 30, 90] as const;
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
 type Range = (typeof RANGES)[number];
 
 /**
@@ -163,6 +165,7 @@ export function AnalyticsView() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [hourly, setHourly] = useState<HourBucketView[]>([]);
   const [domains, setDomains] = useState<DomainUsageView[]>([]);
+  const [activity, setActivity] = useState<ActivityCellView[]>([]);
   const [hover, setHover] = useState<DayPointView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -179,10 +182,11 @@ export function AnalyticsView() {
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
-    const [a, h, d] = await Promise.all([
+    const [a, h, d, ac] = await Promise.all([
       window.selfos.invoke("analytics.range", { days: windowDays }),
       window.selfos.invoke("analytics.hourly", {}),
       window.selfos.invoke("analytics.domains", { days: windowDays }),
+      window.selfos.invoke("analytics.activity", { days: 7 }),
     ]);
     // A newer load started while this one was in flight; it owns the state now.
     if (seq !== loadSeq.current) return;
@@ -193,6 +197,7 @@ export function AnalyticsView() {
     if (a.ok) setData(a.data);
     if (h.ok) setHourly(h.data);
     if (d.ok) setDomains(d.data);
+    if (ac.ok) setActivity(ac.data);
     setError(failure);
   }, [windowDays]);
 
@@ -240,7 +245,16 @@ export function AnalyticsView() {
               sub="active days only"
             />
             <Kpi label="Longest streak" value={`${data.longestStreak}d`} sub="consecutive active days" />
-            <Kpi label="Media" value={formatDuration(data.totals.mediaSeconds)} sub="watch time" />
+            <Kpi label="Media" value={formatDuration(data.totals.mediaSeconds)} sub="local players" />
+            <Kpi
+              label="vs previous"
+              value={
+                data.screenDeltaPct === null
+                  ? "—"
+                  : `${data.screenDeltaPct > 0 ? "+" : ""}${data.screenDeltaPct}%`
+              }
+              sub="screen time"
+            />
           </section>
 
           <section className="panel">
@@ -256,6 +270,36 @@ export function AnalyticsView() {
             </div>
             <DailyChart days={data.days} onHover={setHover} />
             <DataTable days={data.days} />
+          </section>
+
+          <section className="panel">
+            <h2>Activity (last 7 days)</h2>
+            <p className="muted panel-note">
+              Screen time by weekday and hour. Darker cells are busier; the grid is the 7×24 matrix F-TIME-09
+              asks for.
+            </p>
+            <div className="heatmap" role="img" aria-label="Screen time by weekday and hour">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label, weekday) => (
+                <div key={label} className="heatmap-row">
+                  <span className="heatmap-label">{label}</span>
+                  {HOURS.map((hour) => {
+                    const cell = activity.find((c) => c.weekday === weekday && c.hour === hour);
+                    const max = Math.max(1, ...activity.map((c) => c.seconds));
+                    const intensity = Math.min(1, (cell?.seconds ?? 0) / max);
+                    return (
+                      <span
+                        key={`${weekday}-${hour}`}
+                        className="heatmap-cell"
+                        style={{
+                          background: `color-mix(in srgb, var(--accent) ${intensity * 100}%, transparent)`,
+                        }}
+                        title={`${weekday} ${String(hour).padStart(2, "0")}:00 — ${formatDuration(cell?.seconds ?? 0)}`}
+                      />
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           </section>
 
           <section className="panel">

@@ -15,8 +15,9 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { localDateKey } from "../../../shared/dates";
 import { Db } from "../../db/driver";
-import { localDateKey } from "../../modules/time/aggregate";
+import { DEFAULT_RULES, MEDIA_RULES } from "./catalog";
 
 /** Microseconds between 1601-01-01 and 1970-01-01. */
 export const CHROME_EPOCH_OFFSET_MS = 11_644_473_600_000;
@@ -84,29 +85,7 @@ export function isReload(transition: number): boolean {
   return (transition & 0xff) === 8;
 }
 
-export interface MediaRule {
-  domain: string;
-  /** Optional path prefix; `null` means the whole domain counts as media. */
-  pathPrefix?: string | null;
-}
-
-/**
- * Sites whose time is watch time (F-TIME-06). Path prefixes keep
- * `youtube.com/feed` from counting as watching.
- */
-export const MEDIA_RULES: MediaRule[] = [
-  { domain: "youtube.com", pathPrefix: "/watch" },
-  { domain: "youtube.com", pathPrefix: "/shorts" },
-  { domain: "youtube.com", pathPrefix: "/live" },
-  { domain: "m.youtube.com", pathPrefix: "/watch" },
-  { domain: "netflix.com", pathPrefix: "/watch" },
-  { domain: "twitch.tv" },
-  { domain: "vimeo.com" },
-  { domain: "primevideo.com" },
-  { domain: "disneyplus.com" },
-  { domain: "crunchyroll.com" },
-  { domain: "nebula.tv" },
-];
+export { DEFAULT_RULES, MEDIA_RULES, type MediaRule } from "./catalog";
 
 export function isMediaUrl(url: string): boolean {
   let u: URL;
@@ -122,35 +101,6 @@ export function isMediaUrl(url: string): boolean {
   }
   return false;
 }
-
-/**
- * Default categories (F-TIME-07). Only these seed the `domain_rule` table; a
- * user edit always wins because seeding never overwrites an existing row.
- */
-export const DEFAULT_RULES: Array<{ domain: string; category: string; distracting: boolean }> = [
-  { domain: "youtube.com", category: "Entertainment", distracting: true },
-  { domain: "netflix.com", category: "Entertainment", distracting: true },
-  { domain: "twitch.tv", category: "Entertainment", distracting: true },
-  { domain: "reddit.com", category: "Social", distracting: true },
-  { domain: "x.com", category: "Social", distracting: true },
-  { domain: "twitter.com", category: "Social", distracting: true },
-  { domain: "instagram.com", category: "Social", distracting: true },
-  { domain: "facebook.com", category: "Social", distracting: true },
-  { domain: "tiktok.com", category: "Social", distracting: true },
-  { domain: "github.com", category: "Work", distracting: false },
-  { domain: "gitlab.com", category: "Work", distracting: false },
-  { domain: "stackoverflow.com", category: "Work", distracting: false },
-  { domain: "developer.mozilla.org", category: "Work", distracting: false },
-  { domain: "docs.rs", category: "Work", distracting: false },
-  { domain: "crates.io", category: "Work", distracting: false },
-  { domain: "npmjs.com", category: "Work", distracting: false },
-  { domain: "mail.google.com", category: "Communication", distracting: false },
-  { domain: "chatgpt.com", category: "Work", distracting: false },
-  { domain: "claude.ai", category: "Work", distracting: false },
-  { domain: "wikipedia.org", category: "Reference", distracting: false },
-  { domain: "openfront.io", category: "Entertainment", distracting: true },
-];
-
 /** Seed defaults without touching rows the user has already categorised. */
 export function seedDefaultRules(db: Db, now = Date.now()): number {
   let inserted = 0;
@@ -174,15 +124,10 @@ export function seedDefaultRules(db: Db, now = Date.now()): number {
 /** Decide how to read a profile's history right now. */
 export function strategyFor(historyPath: string): Strategy {
   if (!existsSync(historyPath)) return "unavailable";
-  // A zero-byte journal is left behind after a clean close and does not block
-  // an immutable open (observed on this machine's Profile 2).
-  const journal = `${historyPath}-journal`;
-  if (!existsSync(journal)) return "immutable";
-  try {
-    if (statSync(journal).size === 0) return "immutable";
-  } catch {
-    return "snapshot";
-  }
+  // Always read a private copy. The old immutable fast path (no journal at the
+  // check) could race a writer that began immediately after the check and read
+  // a torn B-tree; a copy is the only consistently readable snapshot, and the
+  // 800 MB ceiling plus the four-hour cadence bounds the cost (round-12 Blocker).
   return "snapshot";
 }
 
@@ -199,19 +144,15 @@ export interface IngestResult {
 interface IngestDeps {
   db: Db;
   snapshotDir: string;
-  /** Cap on copied rows per run so a first ingest cannot run for minutes. */
-  maxRows?: number;
 }
 
 export class BrowserHistoryIngest {
   #db: Db;
   #snapshotDir: string;
-  #maxRows: number;
 
   constructor(deps: IngestDeps) {
     this.#db = deps.db;
     this.#snapshotDir = deps.snapshotDir;
-    this.#maxRows = deps.maxRows ?? 5000;
   }
 
   /** Ensure a profile row exists and return its id. */
@@ -289,10 +230,10 @@ export class BrowserHistoryIngest {
       // touch a second file. The driver's `immutable` option existed for exactly
       // this case and had no caller.
       //
-      // `immutable` is the fast path only: a snapshot is a private copy, so it is
-      // opened read-only but not immutable — SQLite must be free to read its
-      // journal, which an immutable open ignores by definition.
-      source = Db.open(readPath, { readonly: true, immutable: strategy !== "snapshot" });
+      // The snapshot is opened read-write so SQLite can recover a copied hot
+      // journal; an immutable or read-only open would ignore it and could read
+      // a torn B-tree.
+      source = Db.open(readPath, { readonly: false, immutable: false });
 
       // Drain pages until the profile is caught up, so a first run does not
       // leave most of the backfill unread. Each page advances the watermark
@@ -360,15 +301,15 @@ export class BrowserHistoryIngest {
     // A stable per-profile name keeps repeated runs from piling up files.
     const key = createHash("sha1").update(profile.historyPath).digest("hex").slice(0, 10);
     const dest = join(this.#snapshotDir, `hist-${key}.sqlite`);
-    rmSync(dest, { force: true });
+    for (const suffix of ["", "-journal", "-wal", "-shm"]) rmSync(`${dest}${suffix}`, { force: true });
     copyFileSync(profile.historyPath, dest);
-    // Deliberately NOT copying the rollback journal. A journal copy forces
-    // SQLite to replay it, which is a write, and the snapshot is opened
-    // read-only: measured `attempt to write a readonly database`. Without the
-    // journal the copy is exactly the last committed state, which is what a
-    // reader wants. The trade-off is a torn B-tree if the browser is mid-write
-    // at this instant; the size guard plus the hourly cadence keeps that rare,
-    // and a failed read is reported rather than silently producing bad rows.
+    // Copy the sidecars too: a hot journal holds committed pages the main file
+    // does not have yet. The copy is opened read-write so SQLite can replay it;
+    // without the journal the copy can be missing the newest visits (round-12).
+    for (const suffix of ["-journal", "-wal", "-shm"]) {
+      const side = `${profile.historyPath}${suffix}`;
+      if (existsSync(side)) copyFileSync(side, `${dest}${suffix}`);
+    }
     return dest;
   }
 
@@ -389,7 +330,7 @@ export class BrowserHistoryIngest {
         ORDER BY v.visit_time
         LIMIT ?`,
       watermark,
-      Math.min(this.#maxRows, PAGE_ROWS),
+      PAGE_ROWS,
     );
     return rows.map((r) => ({
       url: r.url,
@@ -420,13 +361,10 @@ export class BrowserHistoryIngest {
             skipped++;
             continue;
           }
-          // A reload restarts the dwell clock on the same URL, so its
-          // visit_duration is only the last fragment. Counting it would double
-          // count time already recorded by the earlier visit.
-          if (isReload(r.transition) && r.durationUs > 0n) {
-            skipped++;
-            continue;
-          }
+          // A reload restarts the dwell clock on the same URL, but Chromium
+          // gives the reload its own interval and updates the previous visit's
+          // duration. Keeping both, with the duration refreshed on conflict,
+          // records the post-reload dwell instead of discarding it (round-12).
           const visitAt = chromeTimeToMs(r.visitTimeUs);
           const localDate = localDateKey(new Date(visitAt));
           const res = this.#db.run(
@@ -434,7 +372,9 @@ export class BrowserHistoryIngest {
                (profile_id, url, title, domain, visit_time_us, visit_at, local_date,
                 duration_us, transition, source, ingest_run_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'history', ?)
-             ON CONFLICT(profile_id, url, visit_time_us) DO NOTHING`,
+             ON CONFLICT(profile_id, url, visit_time_us) DO UPDATE SET
+               duration_us = MAX(duration_us, excluded.duration_us),
+               title = excluded.title`,
             profileId,
             r.url,
             r.title,

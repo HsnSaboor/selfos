@@ -18,10 +18,10 @@ vi.mock("electron", () => ({
 const { isIdleBeyond } = await import("../src/main/integrations/hyprland/idle");
 
 describe("isIdleBeyond", () => {
-  it("passes the threshold through to Electron", () => {
+  it("converts milliseconds to the seconds Electron expects", () => {
     state.mockReturnValue("active");
     isIdleBeyond(120_000);
-    expect(state).toHaveBeenCalledWith(120_000);
+    expect(state).toHaveBeenCalledWith(120);
   });
 
   it("treats active as present", () => {

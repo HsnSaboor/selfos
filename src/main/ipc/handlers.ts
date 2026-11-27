@@ -25,7 +25,7 @@ import {
   type ScheduleKind,
   ZOOM_MODES,
 } from "../../shared/api";
-import { isDateKey, todayKey } from "../../shared/dates";
+import { dayCount, isDateKey, todayKey } from "../../shared/dates";
 import { autostartEnabled, setAutostart } from "../autostart";
 import { isSafeExternalUrl } from "../external-url";
 import { exportJson, exportPath, stageRestore, tableToCsv, writeExport } from "../modules/data/backup";
@@ -206,6 +206,7 @@ const handlers: { [K in ApiName]: Handler<K> } = {
       ...(p.masjid !== undefined ? { masjid: requireString(p.masjid, "masjid") } : {}),
     });
   },
+  "salah.markers": async (p, svc) => svc.prayerMarkers(dateKeyOrToday(p?.localDate)),
   "salah.clear": (p, svc) => {
     if (!isOneOf(p?.prayer, PRAYER_IDS)) {
       throw new Error(`prayer must be one of: ${PRAYER_IDS.join(", ")}`);
@@ -459,6 +460,7 @@ const handlers: { [K in ApiName]: Handler<K> } = {
   },
 
   "analytics.range": (p, svc) => svc.analytics(dayCount(p?.days, 30)),
+  "analytics.activity": (p, svc) => svc.activity(dayCount(p?.days, 7)),
   "analytics.hourly": (p, svc) => svc.hourly(dateKeyOrToday(p?.localDate)),
   "analytics.domains": (p, svc) => svc.domains(dayCount(p?.days, 30)),
 
@@ -667,22 +669,6 @@ function requireRange(value: unknown, field: string, min: number, max: number): 
     throw new Error(`${field} must be a number between ${min} and ${max}`);
   }
   return value;
-}
-
-/**
- * A day-count from the renderer, clamped to the range every range-taking
- * channel shares (1..366).
- *
- * Non-finite values are refused rather than clamped: `Math.min(366, Math.max(1,
- * NaN))` is `NaN`, and a `NaN` handed to a date walk throws `Invalid time value`
- * from deep inside `Date` — a message that names neither the channel nor the
- * field. Probed: `analytics.range {days: NaN}` failed exactly that way while
- * `habits.heatmap` refused the same input by name.
- */
-function dayCount(value: unknown, fallback: number): number {
-  const days = value ?? fallback;
-  if (typeof days !== "number" || !Number.isFinite(days)) throw new Error("days must be a finite number");
-  return Math.min(366, Math.max(1, Math.trunc(days)));
 }
 
 /**

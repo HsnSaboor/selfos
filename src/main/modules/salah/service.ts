@@ -7,6 +7,7 @@
  * plays audio (F-SALAH-09).
  */
 import { readFileSync } from "node:fs";
+import { localDateKey } from "../../../shared/dates";
 import type { Db } from "../../db/driver";
 import {
   PRAYER_LABELS,
@@ -18,7 +19,6 @@ import {
   type SalahTimes,
 } from "../../integrations/salah/bridge";
 import { computeTimes, parseSalahConfig, type SalahConfig } from "../../integrations/salah/compute";
-import { localDateKey } from "../time/aggregate";
 import {
   buildDayState,
   classifyLog,

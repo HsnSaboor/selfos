@@ -20,6 +20,27 @@ export function todayKey(): string {
   return localDateKey(new Date());
 }
 
+/** Add (or subtract) calendar days to a `YYYY-MM-DD` key, in UTC. */
+export function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Clamp a renderer-supplied day count to the range every range-taking channel
+ * shares (1..366). Non-finite values are refused rather than clamped:
+ * `Math.min(366, Math.max(1, NaN))` is NaN, and a NaN handed to a date walk
+ * throws `Invalid time value` from deep inside `Date`.
+ */
+export function dayCount(value: unknown, fallback: number): number {
+  const days = value ?? fallback;
+  if (typeof days !== "number" || !Number.isFinite(days)) {
+    throw new Error("days must be a finite number");
+  }
+  return Math.min(366, Math.max(1, Math.trunc(days)));
+}
+
 /**
  * Is this a real `YYYY-MM-DD` calendar date?
  *

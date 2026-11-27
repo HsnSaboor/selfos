@@ -2232,3 +2232,65 @@ was applied. Round 11 is **not clean**: 1 Blocker and 19 Majors were filed.
 | Real database | untouched (verifier scratch) |
 
 **Round 11 reviewer status:** all three reported. Not clean (Blocker + Majors).
+
+---
+
+# Round 12 — time and site accounting
+
+Reviewers: all three ran, fresh context, read-only. The round is **not clean**:
+1 Blocker, 16 Majors and 11 Nits (design_critic), 1 Blocker, 10 Majors and 19
+Nits (codebase_details), 7 Majors and 10 Nits (zoom_out). Overlaps removed, the
+distinct findings were verified against the code and fixed.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 220 | BLOCKER | The "snapshot" ingest path copied only the main DB and omitted a hot journal, so the copy could be missing committed rows; the immutable fast path could also race a writer | FIXED — always copy DB + `-journal`/`-wal`/`-shm` and open the copy read-write so SQLite recovers |
+| 221 | BLOCKER | Wave-3 #3's "segment closes when the inferred site changes" was not in the code: a title change only retitled, so a two-hour browser stretch was attributed to the last site | FIXED — `#onTitle` closes and reopens on a site change; test updated to the split |
+| 222 | MAJOR | Provisional snapshot rows were deleted by `started_at`, but the merger can move the start backwards, leaving an orphan counted twice | FIXED — delete by `session_id` + `:snapshot` before every write |
+| 223 | MAJOR | `#flush` wrote an unsplit provisional row, so an open segment crossing midnight inflated yesterday | FIXED — provisional rows go through `splitAtMidnight` |
+| 224 | MAJOR | `stop()` never closed the open segment, leaving a provisional row no later event replaces | FIXED — close and commit as final; the client no longer reports a gap for its own stop |
+| 225 | MAJOR | `getSystemIdleState` was given milliseconds where Electron expects seconds (120 000 s ≈ 33 h), so the measured idle signal always said "active" | FIXED — explicit ms→s conversion + test |
+| 226 | MAJOR | The `windowtitlev2` address gate was empty at startup/reconnect and stale after a drop | FIXED — primed from `hyprctl -j activewindow` on connect, cleared on close |
+| 227 | MAJOR | `siteUsage` reconciled history and title time with `Math.max`, under-counting disjoint intervals and contradicting its header | FIXED — union of both interval sets; header corrected; test updated |
+| 228 | MAJOR | `watchTime.bySite` reused whole-domain seconds, so the breakdown could exceed the total (200% bars) | FIXED — per-domain media union from the same filtered rows; `byTitle` added |
+| 229 | MAJOR | A user's `is_media` rule was ignored for history rows | FIXED — `meta.media \|\| isMediaUrl(url)` in both paths |
+| 230 | MAJOR | Browser visits were not clipped at local midnight | FIXED — intervals clipped to the visit's own day |
+| 231 | MAJOR | Time read `reading_session` while reading called time's rebuild (P-1 cycle) | FIXED — `computeDayAggregate(db, date, readingSeconds)`; reading passes its own total |
+| 232 | MAJOR | `localDateKey` was reached through the time module by eight files; analytics imported `addDays` from goals | FIXED — `shared/dates` owns both; re-export deleted |
+| 233 | MAJOR | Three hand-maintained site catalogues had drifted (`nebula.tv` media but unrecognised; 10 title-known sites uncategorised) | FIXED — one `SITE_CATALOG` derives `MEDIA_RULES`, `DEFAULT_RULES` and `SUFFIX_SITES` |
+| 234 | MAJOR | No F-TIME-08 focus sessions and no F-TIME-09 7×24 matrix/trend | FIXED — migration 0003, `focus_sessions`/`longest_focus_seconds`, `analytics.activity`, previous-period delta, UI |
+| 235 | MAJOR | F-DASH-02 timeline had no category colour and no prayer overlay | FIXED — category per segment + `salah.markers` + CSS markers |
+| 236 | MAJOR | F-TIME-07 bulk categorisation had no renderer caller | FIXED — uncategorized list with apply-all |
+| 237 | MAJOR | Reload visits were dropped and a visit first seen at 0 duration was never refreshed | FIXED — reloads kept; `ON CONFLICT … duration_us = MAX(...)` |
+| 238 | MAJOR | `last_backup_at`… (round 11 residue) verified fixed | CONFIRMED |
+| 239 | NIT | `sameApp` merge ignored contiguity and invented time across a hole | FIXED |
+| 240 | NIT | Exclusion lowercased only one side; excluded provisional rows survived | FIXED — one `normalizeClass`, delete before return |
+| 241 | NIT | `segmentsWritten` counted 10 s snapshot rewrites | FIXED — final rows only |
+| 242 | NIT | `socketPath` option was accepted but not wired | FIXED |
+| 243 | NIT | `maxRows` was a dead knob documented as a per-run cap | FIXED — removed; `PAGE_ROWS`/`MAX_PAGES_PER_RUN` are the constants |
+| 244 | NIT | `uncategorizedDomains` scanned the whole visit table | FIXED — bounded GROUP BY + `IN` |
+| 245 | NIT | `pagesForDomain` collapsed every title row to one page | FIXED — title rows keyed by title |
+| 246 | NIT | `/\bX$/i` matched any title ending in x | FIXED — exact `x` |
+| 247 | NIT | `#titleProfileId` cached a 0 sentinel that would fail every insert | FIXED — throws |
+| 248 | NIT | Window-title `visit_time_us` used Unix µs while history uses Chrome µs | FIXED — `msToChromeTime` |
+| 249 | NIT | Two subprocesses every 5 s forever while auto-paused | FIXED — 6× backoff while paused |
+| 250 | NIT | Snapshot left behind on worker timeout | FIXED — cleanup on timeout |
+| 251 | NIT | `dayCount` existed in three places | FIXED — one in `shared/dates` |
+| 252 | NIT | `history` field on `Services` was unused | FIXED — removed |
+| 253 | NIT | `hourlyProfile` comment claimed focus, summed flickers; DST fallback undocumented | FIXED — comment |
+| 254 | NIT | Category `distracting` was order-dependent | FIXED — any-domain rule |
+| 255 | NIT | `visits` mixed source row counts | FIXED — documented as row count, title rows excluded from the site list |
+| 256 | NIT | STACK claims: pause file flag, event table, title parser, ingest constants, schema `source`/types, `smol-toml`/`fs.watch`, zod | FIXED — all corrected |
+| 257 | NIT | `F-TIME-10` longest stretch / switches per hour | PARTIAL — longest stretch shipped; switches/hour recorded |
+| 258 | NIT | `F-TIME-11` crash supervision, F-TIME-12/15, F-DASH-09 components | RECORDED — target architecture documented in STACK §5.2/§14 |
+
+## Round 12 verification
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `biome check src tests` | clean |
+| `vitest run` | **461 passed** |
+| verifiers | M0 32/32, M2 29/29, M3 32/32, M4 32/32, M5 49/49, M6 48/48, M7 52/52, M8 39/39; M1 skipped (no Hyprland socket) |
+
+**Round 12 reviewer status:** all three reported. Not clean.

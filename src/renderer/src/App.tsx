@@ -6,6 +6,7 @@ import {
   MODULE_IDS,
   type ModuleId,
   PRAYER_COUNT,
+  type PrayerMarker,
   type ThemeTokens,
   type TimelineSegment,
 } from "../../shared/api";
@@ -74,6 +75,7 @@ function App() {
   const [day, setDay] = useState<DaySummary | null>(null);
   const [health, setHealth] = useState<HealthReport | null>(null);
   const [segments, setSegments] = useState<TimelineSegment[]>([]);
+  const [prayers, setPrayers] = useState<PrayerMarker[]>([]);
   const [apps, setApps] = useState<AppUsage[]>([]);
   /**
    * Errors keyed by source.
@@ -105,11 +107,12 @@ function App() {
    * last failure survived and the message never named what broke.
    */
   const refreshDashboard = useCallback(async () => {
-    const [d, h, tl, ta] = await Promise.all([
+    const [d, h, tl, ta, pm] = await Promise.all([
       window.selfos.invoke("dashboard.day", {}),
       window.selfos.invoke("system.health", undefined),
       window.selfos.invoke("time.timeline", {}),
       window.selfos.invoke("time.topApps", {}),
+      window.selfos.invoke("salah.markers", {}),
     ]);
     const failures: string[] = [];
     if (d.ok) setDay(d.data);
@@ -120,6 +123,8 @@ function App() {
     else failures.push(`timeline: ${tl.error}`);
     if (ta.ok) setApps(ta.data);
     else failures.push(`apps: ${ta.error}`);
+    if (pm.ok) setPrayers(pm.data);
+    else failures.push(`prayers: ${pm.error}`);
     // Clears only this source's entry, so a recovered dashboard stops showing
     // its own error without erasing an unrelated theme or command failure.
     setErrorFor("dashboard", failures.length ? failures.join("; ") : null);
@@ -414,7 +419,7 @@ function App() {
                     {day ? `${formatClock(day.firstActivity)} – ${formatClock(day.lastActivity)}` : ""}
                   </span>
                 </div>
-                <Timeline segments={segments} dayStart={dayStart} />
+                <Timeline segments={segments} dayStart={dayStart} prayers={prayers} />
                 <div className="legend">
                   {apps.slice(0, 5).map((a) => (
                     <span key={a.appClass} className="legend-item">

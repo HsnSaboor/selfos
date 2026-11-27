@@ -5,9 +5,9 @@
 
 import { existsSync, type FSWatcher, statSync, watch } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { localDateKey } from "../../../shared/dates";
 import { buildHighlightsMarkdown } from "../../../shared/highlights";
 import type { Db } from "../../db/driver";
-import { localDateKey } from "../time/aggregate";
 import {
   discoverVaults,
   exportMarker,

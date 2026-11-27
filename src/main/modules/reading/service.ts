@@ -4,9 +4,10 @@
 
 import { ANCHOR_VERSION, type HighlightAnchor } from "../../../shared/anchors";
 import type { BookSettingsView, BookView } from "../../../shared/api";
+import { localDateKey } from "../../../shared/dates";
 import { buildHighlightsMarkdown } from "../../../shared/highlights";
 import type { Db } from "../../db/driver";
-import { localDateKey, rebuildDay } from "../time/aggregate";
+import { rebuildDay } from "../time/aggregate";
 import { BookStore, DEFAULT_SETTINGS } from "./library";
 
 export interface HighlightRow {
@@ -81,6 +82,16 @@ export class ReadingService {
   constructor(db: Db, libraryDir: string) {
     this.#db = db;
     this.store = new BookStore(db, libraryDir);
+  }
+
+  /** Reading seconds for a day; the time module's rebuild takes this as input. */
+  readingSeconds(localDate: string): number {
+    return (
+      this.#db.get<{ ms: number | null }>(
+        "SELECT SUM(active_seconds) AS ms FROM reading_session WHERE local_date = ?",
+        localDate,
+      )?.ms ?? 0
+    );
   }
 
   list(): BookView[] {
@@ -211,7 +222,7 @@ export class ReadingService {
     // reading_session, and nothing else recomputes it when tracking is paused.
     // A session that crosses midnight stays on its start date, so rebuild that
     // date rather than "today".
-    rebuildDay(this.#db, s.localDate);
+    rebuildDay(this.#db, s.localDate, this.readingSeconds(s.localDate));
     return { activeSeconds, pagesTurned: s.pagesTurned };
   }
 

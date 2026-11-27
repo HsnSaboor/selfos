@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { AppUsage, TimelineSegment } from "../../../shared/api";
+import type { AppUsage, PrayerMarker, TimelineSegment } from "../../../shared/api";
 import { formatDuration } from "../../../shared/format";
 
 /** A few seconds of activity is sub-pixel on a 24 h axis; keep it visible. */
@@ -40,7 +40,15 @@ export function colorFor(appClass: string): string {
   return `var(${PALETTE[hashClass(appClass)]})`;
 }
 
-export function Timeline({ segments, dayStart }: { segments: TimelineSegment[]; dayStart: number }) {
+export function Timeline({
+  segments,
+  dayStart,
+  prayers = [],
+}: {
+  segments: TimelineSegment[];
+  dayStart: number;
+  prayers?: PrayerMarker[];
+}) {
   const bars = useMemo(() => {
     const span = dayLengthMs(dayStart);
     return segments
@@ -65,10 +73,23 @@ export function Timeline({ segments, dayStart }: { segments: TimelineSegment[]; 
           <div
             key={`${b.startedAt}-${b.appClass}`}
             className="timeline-bar"
-            style={{ left: `${b.left}%`, width: `${b.width}%`, background: colorFor(b.appClass) }}
-            title={`${b.appClass} · ${b.seconds}s${b.appTitle ? ` · ${b.appTitle}` : ""}`}
+            style={{ left: `${b.left}%`, width: `${b.width}%`, background: colorFor(b.category) }}
+            title={`${b.appClass} · ${b.category} · ${b.seconds}s${b.appTitle ? ` · ${b.appTitle}` : ""}`}
           />
         ))}
+        {/* F-DASH-02: prayer times as markers over the band. */}
+        {prayers.map((p) => {
+          const [hh, mm] = p.time.split(":").map(Number);
+          const left = (((hh ?? 0) * 60 + (mm ?? 0)) / 1440) * 100;
+          return (
+            <span
+              key={p.prayer}
+              className="timeline-marker"
+              style={{ left: `${left}%` }}
+              title={`${p.prayer} ${p.time}${p.status ? ` · ${p.status}` : ""}`}
+            />
+          );
+        })}
         {bars.length === 0 ? <div className="timeline-empty">No activity recorded yet</div> : null}
       </div>
       <div className="timeline-axis">

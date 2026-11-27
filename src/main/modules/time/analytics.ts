@@ -5,9 +5,9 @@
  * `focus_event`. That keeps a 90-day report a single indexed scan instead of
  * re-summing raw segments, and keeps the numbers identical to the dashboard.
  */
+
+import { addDays, dayCount, localDateKey } from "../../../shared/dates";
 import type { Db } from "../../db/driver";
-import { addDays } from "../goals/model";
-import { localDateKey } from "./aggregate";
 import { unionSeconds } from "./sites";
 
 export interface DayPoint {
@@ -32,13 +32,17 @@ export interface AnalyticsRange {
   /** Longest run of consecutive days with any screen time. */
   longestStreak: number;
   currentStreak: number;
+  /** Screen time in the preceding period of equal length (F-TIME-09). */
+  previousScreenSeconds: number;
+  /** Percent change vs that period; null when it had no activity. */
+  screenDeltaPct: number | null;
 }
 
 const EMPTY = { screenSeconds: 0, focusedSeconds: 0, mediaSeconds: 0, readingSeconds: 0, switches: 0 };
 
 /** Inclusive date range, defaulting to the last `days` days ending today. */
 export function dateRange(days: number, today = localDateKey(new Date())): { from: string; to: string } {
-  const span = Math.max(1, Math.min(366, Math.floor(days)));
+  const span = dayCount(days, 30);
   return { from: addDays(today, -(span - 1)), to: today };
 }
 
@@ -116,6 +120,21 @@ export function analyse(db: Db, days: number, today = localDateKey(new Date())):
   );
   const s = streaks(out);
 
+  // Trend against the immediately preceding period of the same length
+  // (F-TIME-09). A zero previous period reports no delta rather than +∞.
+  const prevTo = addDays(from, -1);
+  const prevFrom = addDays(prevTo, -(days - 1));
+  const prev = db.get<{ screen_seconds: number }>(
+    "SELECT SUM(screen_seconds) AS screen_seconds FROM day_aggregate WHERE local_date BETWEEN ? AND ?",
+    prevFrom,
+    prevTo,
+  );
+  const previousScreenSeconds = prev?.screen_seconds ?? 0;
+  const screenDeltaPct =
+    previousScreenSeconds > 0
+      ? Math.round(((totals.screenSeconds - previousScreenSeconds) / previousScreenSeconds) * 100)
+      : null;
+
   return {
     from,
     to,
@@ -127,6 +146,8 @@ export function analyse(db: Db, days: number, today = localDateKey(new Date())):
     worstDay: worst,
     longestStreak: s.longest,
     currentStreak: s.current,
+    previousScreenSeconds,
+    screenDeltaPct,
   };
 }
 
@@ -135,7 +156,7 @@ export interface HourBucket {
   seconds: number;
 }
 
-/** Seconds of focus per hour of the local day, for one date. */
+/** Seconds of screen time per local hour (flickers included), for one date. */
 export function hourlyProfile(db: Db, localDate: string): HourBucket[] {
   const rows = db.all<{ started_at: number; ended_at: number }>(
     "SELECT started_at, ended_at FROM focus_event WHERE local_date = ? ORDER BY started_at",
@@ -199,4 +220,46 @@ export function topDomains(
     .map(([domain, v]) => ({ domain, seconds: unionSeconds(v.intervals), visits: v.visits }))
     .sort((a, b) => b.seconds - a.seconds)
     .slice(0, limit);
+}
+
+export interface ActivityCell {
+  weekday: number;
+  hour: number;
+  seconds: number;
+}
+
+/**
+ * F-TIME-09: a 7×24 activity matrix over the last `days` days.
+ *
+ * Weekday 0 is Sunday, matching `Date.getDay()`, so the renderer can label the
+ * rows without a second convention.
+ */
+export function activityMatrix(db: Db, days = 7, today = localDateKey(new Date())): ActivityCell[] {
+  const { from, to } = dateRange(days, today);
+  const rows = db.all<{ started_at: number; ended_at: number }>(
+    `SELECT started_at, ended_at FROM focus_event
+      WHERE local_date BETWEEN ? AND ? ORDER BY started_at`,
+    from,
+    to,
+  );
+  const cells = new Map<string, number>();
+  for (const r of rows) {
+    let start = r.started_at;
+    while (start < r.ended_at) {
+      const d = new Date(start);
+      const hourStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
+      const natural = hourStart + 3_600_000;
+      const end = Math.min(r.ended_at, natural > start ? natural : start + 3_600_000);
+      const key = `${d.getDay()}:${d.getHours()}`;
+      cells.set(key, (cells.get(key) ?? 0) + Math.max(0, end - start));
+      start = end;
+    }
+  }
+  const out: ActivityCell[] = [];
+  for (let weekday = 0; weekday < 7; weekday++) {
+    for (let hour = 0; hour < 24; hour++) {
+      out.push({ weekday, hour, seconds: Math.round((cells.get(`${weekday}:${hour}`) ?? 0) / 1000) });
+    }
+  }
+  return out;
 }

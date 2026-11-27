@@ -8,9 +8,11 @@
  *  - `window-title`— focused seconds attributed to a site inferred from the
  *                    title. Used only for time history does not cover.
  *
- * `siteUsage` therefore reconciles them: history wins where it has a duration,
- * and window-title time fills the remainder so a day is never double counted.
- * Every row keeps its source so the UI can show provenance (D-05).
+ * `siteUsage` therefore reconciles them per domain with a **union** of the two
+ * interval sets: never a sum (the same moment can appear in both), never a max
+ * (max is only correct when one set contains the other, and a watermark lag
+ * makes them disjoint). Every row keeps its source so the UI can show
+ * provenance (D-05).
  */
 import type { Db } from "../../db/driver";
 import { isMediaUrl, MEDIA_RULES } from "../../integrations/browser-history/ingest";
@@ -52,7 +54,9 @@ export interface SiteTotals {
 
 export interface WatchTime {
   seconds: number;
-  bySite: Array<{ domain: string; seconds: number; visits: number }>;
+  bySite: Array<{ domain: string; seconds: number }>;
+  /** F-TIME-06 per-title breakdown, where the title was recorded. */
+  byTitle: Array<{ title: string; seconds: number }>;
 }
 
 function categoryFor(
@@ -130,26 +134,25 @@ export function siteUsage(db: Db, localDate: string): SiteUsage[] {
   const rules = loadRules(db);
   const byDomain = new Map<string, SiteUsage>();
 
-  const visits = db.all<{ domain: string; visit_at: number; duration_us: number }>(
-    `SELECT domain, visit_at, duration_us FROM browser_visit
+  const visits = db.all<{ domain: string; url: string; visit_at: number; duration_us: number }>(
+    `SELECT domain, url, visit_at, duration_us FROM browser_visit
       WHERE local_date = ? AND source = 'history'`,
     localDate,
   );
-  const visitCounts = db.all<{ domain: string; visits: number }>(
-    `SELECT domain, COUNT(*) AS visits FROM browser_visit
-      WHERE local_date = ? AND source = 'history' GROUP BY domain`,
-    localDate,
-  );
-  const counts = new Map(visitCounts.map((r) => [r.domain, r.visits]));
   const historyIntervals = groupIntervals(visits);
   for (const [domain, intervals] of historyIntervals) {
     const meta = categoryFor(rules, domain);
+    // The user's `is_media` rule applies to history rows too: marking a domain
+    // as media and then ignoring the mark made watchTime list it with 0 seconds.
+    const media = meta.media || visits.some((v) => v.domain === domain && isMediaUrl(v.url));
     const seconds = unionSeconds(intervals);
+    if (seconds <= 0) continue;
     byDomain.set(domain, {
       domain,
       ...meta,
+      media,
       seconds,
-      visits: counts.get(domain) ?? intervals.length,
+      visits: intervals.length,
       source: "history",
       historySeconds: seconds,
       titleSeconds: 0,
@@ -159,8 +162,8 @@ export function siteUsage(db: Db, localDate: string): SiteUsage[] {
   // Window-title rows are stored in browser_visit with source = 'window-title'.
   // They come from focus segments, which never overlap, so a union is exact
   // and also protects against a duplicated segment.
-  const titleRows = db.all<{ domain: string; visit_at: number; duration_us: number }>(
-    `SELECT domain, visit_at, duration_us FROM browser_visit
+  const titleRows = db.all<{ domain: string; url: string; visit_at: number; duration_us: number }>(
+    `SELECT domain, url, visit_at, duration_us FROM browser_visit
       WHERE local_date = ? AND source = 'window-title'`,
     localDate,
   );
@@ -168,19 +171,24 @@ export function siteUsage(db: Db, localDate: string): SiteUsage[] {
   for (const [domain, intervals] of titleIntervals) {
     const meta = categoryFor(rules, domain);
     const seconds = unionSeconds(intervals);
-    const t = { domain, seconds, visits: intervals.length };
-    const existing = byDomain.get(t.domain);
+    if (seconds <= 0) continue;
+    const media = meta.media || titleRows.some((r) => r.domain === domain && isMediaUrl(r.url));
+    const existing = byDomain.get(domain);
     if (existing) {
+      // One union over both interval sets: max under-counts disjoint intervals,
+      // sum double counts overlap (round-12).
+      existing.seconds = unionSeconds([...(historyIntervals.get(domain) ?? []), ...intervals]);
       existing.titleSeconds += seconds;
-      existing.seconds = Math.max(existing.historySeconds, existing.titleSeconds);
-      existing.source = "mixed";
-      existing.visits += t.visits;
+      existing.source = existing.historySeconds > 0 ? "mixed" : "window-title";
+      existing.visits += intervals.length;
+      existing.media = existing.media || media;
     } else {
-      byDomain.set(t.domain, {
-        domain: t.domain,
+      byDomain.set(domain, {
+        domain,
         ...meta,
+        media,
         seconds,
-        visits: t.visits,
+        visits: intervals.length,
         source: "window-title",
         historySeconds: 0,
         titleSeconds: seconds,
@@ -198,10 +206,19 @@ function groupIntervals(
   const out = new Map<string, Interval[]>();
   for (const r of rows) {
     const list = out.get(r.domain) ?? [];
-    list.push({ start: r.visit_at, end: r.visit_at + Math.round(r.duration_us / 1000) });
+    // Clip at the local day boundary: a 23:50 visit that runs 30 min belongs
+    // 10 min to this day and 20 min to the next, not 30 to this one (D-04).
+    const end = Math.min(r.visit_at + Math.round(r.duration_us / 1000), localDayEnd(r));
+    if (end > r.visit_at) list.push({ start: r.visit_at, end });
     out.set(r.domain, list);
   }
   return out;
+}
+
+/** Local midnight at the end of the visit's own day. */
+function localDayEnd(row: { visit_at: number }): number {
+  const d = new Date(row.visit_at);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0).getTime();
 }
 
 /**
@@ -230,7 +247,7 @@ export function siteTotals(db: Db, localDate: string): SiteTotals {
     // Path-aware for history rows: `youtube.com/feed` is browsing, not watching.
     // Window-title rows only carry the bare domain, so they fall back to the
     // domain-level media rule.
-    const isMedia = r.source === "history" ? isMediaUrl(r.url) : meta.media || isMediaDomain(r.domain);
+    const isMedia = meta.media || (r.source === "history" ? isMediaUrl(r.url) : isMediaDomain(r.domain));
     if (isMedia) media.push(iv);
   }
   return {
@@ -262,7 +279,11 @@ export function categoryUsage(
   const byCategory = new Map<string, { intervals: Interval[]; distracting: boolean }>();
   for (const r of rows) {
     const meta = categoryFor(rules, r.domain);
-    const entry = byCategory.get(meta.category) ?? { intervals: [], distracting: meta.distracting };
+    // A category is distracting if *any* of its domains is: the flag is a
+    // property of the category the user sees, not of whichever row was read
+    // first (round-12 nit).
+    const entry = byCategory.get(meta.category) ?? { intervals: [], distracting: false };
+    entry.distracting = entry.distracting || meta.distracting;
     const end = r.visit_at + Math.round(r.duration_us / 1000);
     if (end > r.visit_at) entry.intervals.push({ start: r.visit_at, end });
     byCategory.set(meta.category, entry);
@@ -285,26 +306,62 @@ export function categoryUsage(
  * caller from `day_aggregate.media_seconds`; this function returns the
  * browser half only.
  */
-export function watchTime(db: Db, localDate: string): WatchTime {
-  const sites = siteUsage(db, localDate);
-  const media = sites.filter((s) => s.media || isMediaDomain(s.domain));
+export function watchTime(db: Db, localDate: string, known?: SiteUsage[]): WatchTime {
+  const sites = known ?? siteUsage(db, localDate);
+  const mediaDomains = new Set(sites.filter((s) => s.media || isMediaDomain(s.domain)).map((s) => s.domain));
   const rows = db
-    .all<{ domain: string; url: string; source: string; visit_at: number; duration_us: number }>(
-      "SELECT domain, url, source, visit_at, duration_us FROM browser_visit WHERE local_date = ?",
+    .all<{
+      domain: string;
+      url: string;
+      title: string | null;
+      source: string;
+      visit_at: number;
+      duration_us: number;
+    }>(
+      "SELECT domain, url, title, source, visit_at, duration_us FROM browser_visit WHERE local_date = ?",
       localDate,
     )
-    .filter((r) => media.some((m) => m.domain === r.domain))
+    .filter((r) => mediaDomains.has(r.domain))
     // Path-aware for history: a YouTube feed page is not watch time.
-    .filter((r) => (r.source === "history" ? isMediaUrl(r.url) : true));
+    .filter((r) =>
+      r.source === "history" ? isMediaUrl(r.url) : isMediaDomain(r.domain) || mediaDomains.has(r.domain),
+    );
+
+  // Per-domain and per-title unions use the same filtered rows as the total, so
+  // the breakdown can never exceed the headline (round-12).
+  const byDomain = new Map<string, { start: number; end: number }[]>();
+  const byTitle = new Map<string, { start: number; end: number }[]>();
+  for (const r of rows) {
+    const end = Math.min(r.visit_at + Math.round(r.duration_us / 1000), localDayEnd(r));
+    if (end <= r.visit_at) continue;
+    const iv = { start: r.visit_at, end };
+    const d = byDomain.get(r.domain) ?? [];
+    d.push(iv);
+    byDomain.set(r.domain, d);
+    if (r.title) {
+      const key = `${r.domain} — ${r.title}`;
+      const t = byTitle.get(key) ?? [];
+      t.push(iv);
+      byTitle.set(key, t);
+    }
+  }
+  const titles = [...byTitle.entries()]
+    .map(([title, intervals]) => ({ title, seconds: unionSeconds(intervals) }))
+    .filter((t) => t.seconds > 0)
+    .sort((a, b) => b.seconds - a.seconds);
   return {
     // Two media tabs open at once still only count once.
     seconds: unionSeconds(
       rows.map((r) => ({
         start: r.visit_at,
-        end: r.visit_at + Math.round(r.duration_us / 1000),
+        end: Math.min(r.visit_at + Math.round(r.duration_us / 1000), localDayEnd(r)),
       })),
     ),
-    bySite: media.map((s) => ({ domain: s.domain, seconds: s.seconds, visits: s.visits })),
+    bySite: [...byDomain.entries()]
+      .map(([domain, intervals]) => ({ domain, seconds: unionSeconds(intervals) }))
+      .filter((s) => s.seconds > 0)
+      .sort((a, b) => b.seconds - a.seconds),
+    byTitle: titles,
   };
 }
 
@@ -336,7 +393,7 @@ function isMediaDomain(domain: string): boolean {
   }
 }
 
-/** Per-page dwell for one domain, newest first (F-TIME-04). */
+/** Per-page dwell for one domain, largest dwell first (F-TIME-04). */
 export function pagesForDomain(
   db: Db,
   domain: string,
@@ -360,9 +417,13 @@ export function pagesForDomain(
   );
   const byUrl = new Map<string, { title: string | null; intervals: Interval[] }>();
   for (const r of rows) {
-    const entry = byUrl.get(r.url) ?? { title: r.title, intervals: [] };
+    // Window-title rows all carry the synthetic `https://<domain>/`; their page
+    // is the title, so key those by title or every fallback page collapses into
+    // one row (round-12).
+    const key = r.url === `https://${domain}/` && r.title ? `title:${r.title}` : r.url;
+    const entry = byUrl.get(key) ?? { title: r.title, intervals: [] };
     entry.intervals.push({ start: r.visit_at, end: r.visit_at + Math.round(r.duration_us / 1000) });
-    byUrl.set(r.url, entry);
+    byUrl.set(key, entry);
   }
   return [...byUrl.entries()]
     .map(([url, v]) => ({
@@ -380,14 +441,25 @@ export function uncategorizedDomains(db: Db, limit = 50): Array<{ domain: string
   // Filter in JS via the same parent-domain lookup the site table uses. A plain
   // `NOT EXISTS (r.domain = v.domain)` listed `music.youtube.com` as
   // uncategorized even though `youtube.com` has a rule and the UI shows it as
-  // Entertainment.
+  // Entertainment. The candidate list is bounded by a GROUP BY instead of a
+  // full scan of a table that grows forever (round-12).
   const rules = loadRules(db);
+  const counts = db.all<{ domain: string; n: number }>(
+    "SELECT domain, COUNT(*) AS n FROM browser_visit GROUP BY domain",
+  );
+  const candidates = counts
+    .filter((r) => categoryFor(rules, r.domain).category === "Uncategorized")
+    .sort((a, b) => b.n - a.n)
+    .slice(0, limit * 4)
+    .map((r) => r.domain);
+  if (candidates.length === 0) return [];
   const rows = db.all<{ domain: string; visit_at: number; duration_us: number }>(
-    "SELECT domain, visit_at, duration_us FROM browser_visit",
+    `SELECT domain, visit_at, duration_us FROM browser_visit WHERE domain IN (${candidates.map(() => "?").join(",")})`,
+    ...candidates,
   );
   return [...groupIntervals(rows).entries()]
-    .filter(([domain]) => categoryFor(rules, domain).category === "Uncategorized")
     .map(([domain, intervals]) => ({ domain, seconds: unionSeconds(intervals) }))
+    .filter((d) => d.seconds > 0)
     .sort((a, b) => b.seconds - a.seconds)
     .slice(0, limit);
 }
@@ -435,4 +507,9 @@ export function setDomainRule(
     media ? 1 : 0,
     Date.now(),
   );
+}
+
+/** Category label for a domain, using the same rules the site table uses. */
+export function categoryForDomain(db: Db, domain: string): string {
+  return categoryFor(loadRules(db), domain).category;
 }

@@ -5,8 +5,9 @@
  * through explicit, validated operations. Deleting a goal is not offered:
  * closing it keeps history (F-GOAL-07).
  */
+
+import { localDateKey } from "../../../shared/dates";
 import type { Db } from "../../db/driver";
-import { localDateKey } from "../time/aggregate";
 import {
   computePace,
   currentValue,

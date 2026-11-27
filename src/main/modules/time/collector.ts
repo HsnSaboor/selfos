@@ -8,12 +8,17 @@
 import { execFileSync } from "node:child_process";
 import { powerMonitor } from "electron";
 import { isSelfOSApp } from "../../../shared/api";
+import { localDateKey } from "../../../shared/dates";
 import type { Db } from "../../db/driver";
+import { msToChromeTime } from "../../integrations/browser-history/ingest";
 import { guessSite, isBrowserClass, pageTitle } from "../../integrations/browser-history/title";
 import { HyprlandClient } from "../../integrations/hyprland/client";
 import { type FocusSegment, SegmentBuilder, SegmentMerger } from "../../integrations/hyprland/events";
 import { readActivityState } from "../../integrations/hyprland/idle";
-import { localDateKey, rebuildDay } from "../../modules/time/aggregate";
+import { rebuildDay } from "./aggregate";
+
+/** A single focus segment cannot plausibly exceed this; longer spans are capped. */
+const MAX_SEGMENT_MS = 12 * 60 * 60 * 1000;
 
 export interface CollectorStatus {
   running: boolean;
@@ -35,6 +40,8 @@ export interface CollectorOptions {
   idleThresholdMs?: number;
   rebuildIntervalMs?: number;
   socketPath?: string;
+  /** Reading seconds for a day, supplied by the reading module (P-1). */
+  readingSeconds?: (localDate: string) => number;
   /** Injected for tests. */
   now?: () => number;
 }
@@ -64,7 +71,10 @@ export function splitAtMidnight(seg: FocusSegment): FocusSegment[] {
 
 export class TimeCollector {
   #db: Db;
-  #opts: Required<Omit<CollectorOptions, "socketPath">> & { socketPath?: string };
+  #opts: Required<Omit<CollectorOptions, "socketPath" | "readingSeconds">> & {
+    socketPath?: string;
+    readingSeconds?: (localDate: string) => number;
+  };
   #client: HyprlandClient | null = null;
   #builder = new SegmentBuilder();
   /**
@@ -92,6 +102,8 @@ export class TimeCollector {
   #rebuildTimer: NodeJS.Timeout | null = null;
   #lastWorkspace: string | null = null;
   #lastTitle = "";
+  #lastClass: string | null = null;
+  #idleTicks = 0;
   #titleProfile: number | null = null;
   /** App classes the user excluded (F-SET-01); never written as events. */
   #excluded = new Set<string>();
@@ -159,7 +171,7 @@ export class TimeCollector {
     if (initial) this.#builder.sample({ ...initial, at: this.#opts.now() }, "hyprctl-reconcile");
 
     this.#client = new HyprlandClient({
-      ...(this.#opts.socketPath ? { signature: undefined, runtimeDir: undefined } : {}),
+      ...(this.#opts.socketPath ? { socketPath: this.#opts.socketPath } : {}),
       onFocus: (appClass, appTitle) => this.#onFocus(appClass, appTitle),
       onTitle: (title) => this.#onTitle(title),
       onWorkspace: (id) => {
@@ -167,9 +179,14 @@ export class TimeCollector {
       },
       onConnected: () => {
         this.#error = null;
-        // Reconnect may follow a gap; start a fresh segment from real state.
+        // Reconnect may follow a gap; start a fresh segment from real state and
+        // prime the title gate, which is otherwise empty until the next
+        // activewindowv2 and would accept a background window's title.
         const s = this.#reconcile();
-        if (s) this.#builder.sample({ ...s, at: this.#opts.now() }, "hyprctl-reconcile");
+        if (s) {
+          this.#builder.sample({ ...s, at: this.#opts.now() }, "hyprctl-reconcile");
+          this.#client?.setFocusedAddress(s.address);
+        }
       },
       onDisconnected: (reason) => this.#onDisconnected(reason),
       onEvent: (name) => {
@@ -201,8 +218,9 @@ export class TimeCollector {
     powerMonitor.off("resume", this.#onResume);
     powerMonitor.off("shutdown", this.#onSuspend);
     this.#flushTimer = this.#idleTimer = this.#rebuildTimer = null;
-    this.#flush();
-    // Shutdown is a gap: release the held tail so no tracked time is lost.
+    // Close the open segment and write it as final: a clean quit must not
+    // leave a provisional row that no later event will replace (round-12).
+    this.#commit(this.#builder.close(this.#opts.now()));
     this.#commitGap();
   }
 
@@ -231,27 +249,46 @@ export class TimeCollector {
    * normalised here so both the event path and the reconcile path agree.
    */
   static #normalizeClass(appClass: string): string {
-    return isSelfOSApp(appClass) ? "selfos" : appClass;
+    const lower = appClass.trim().toLowerCase();
+    return isSelfOSApp(lower) ? "selfos" : lower;
   }
 
   #onFocus(appClass: string, appTitle: string): void {
     const now = this.#opts.now();
-    if (this.#paused) return;
+    if (this.#paused || this.#pauseReason) return;
     this.#lastTitle = appTitle;
+    this.#lastClass = TimeCollector.#normalizeClass(appClass);
     const closed = this.#builder.sample({
       at: now,
-      appClass: TimeCollector.#normalizeClass(appClass),
+      appClass: this.#lastClass,
       appTitle,
       workspaceId: this.#lastWorkspace,
     });
     this.#commit(closed);
   }
 
+  /**
+   * A title change retitles the open segment — unless the inferred *site*
+   * changed, in which case the segment is closed and reopened at the same
+   * instant. A browser tab switch (GitHub → YouTube) used to attribute the
+   * whole stretch to the last site seen (wave-3 #3, round-12 Blocker).
+   */
   #onTitle(title: string): void {
-    if (this.#paused) return;
+    if (this.#paused || this.#pauseReason) return;
     if (title === this.#lastTitle) return;
+    const now = this.#opts.now();
+    const before = guessSite(this.#lastTitle)?.site ?? null;
+    const after = guessSite(title)?.site ?? null;
+    if (before !== after && this.#lastClass) {
+      this.#commit(this.#builder.close(now));
+      this.#builder.sample(
+        { at: now, appClass: this.#lastClass, appTitle: title, workspaceId: this.#lastWorkspace },
+        "title-site-change",
+      );
+    } else {
+      this.#builder.retitle(title);
+    }
     this.#lastTitle = title;
-    this.#builder.retitle(title);
   }
 
   #onDisconnected(reason: string): void {
@@ -264,16 +301,27 @@ export class TimeCollector {
     if (reason !== "closed") this.#error = `hyprland socket: ${reason}`;
   }
 
-  #reconcile(): { appClass: string; appTitle: string; workspaceId: string | null } | null {
+  #reconcile(): {
+    appClass: string;
+    appTitle: string;
+    workspaceId: string | null;
+    address: string | null;
+  } | null {
     try {
       const out = execFileSync("hyprctl", ["-j", "activewindow"], { encoding: "utf8", timeout: 2000 });
-      const j = JSON.parse(out) as { class?: string; title?: string; workspace?: { id?: number | string } };
+      const j = JSON.parse(out) as {
+        class?: string;
+        title?: string;
+        address?: string;
+        workspace?: { id?: number | string };
+      };
       const ws = j.workspace?.id;
       this.#lastWorkspace = ws !== undefined ? String(ws) : this.#lastWorkspace;
       return {
         appClass: TimeCollector.#normalizeClass(j.class ?? ""),
         appTitle: j.title ?? "",
         workspaceId: this.#lastWorkspace,
+        address: j.address ?? null,
       };
     } catch {
       return null;
@@ -282,6 +330,10 @@ export class TimeCollector {
 
   async #pollIdle(): Promise<void> {
     if (this.#paused || !this.#running) return;
+    // While auto-paused, back off: loginctl + hyprctl were spawned every 5 s
+    // forever (~34.5k spawns/day), and nothing changes while the user is away.
+    this.#idleTicks++;
+    if (this.#pauseReason && this.#idleTicks % 6 !== 0) return;
     const state = await readActivityState(this.#opts.sessionId, this.#opts.idleThresholdMs);
     if (state.pauseReason) {
       const now = this.#opts.now();
@@ -332,8 +384,12 @@ export class TimeCollector {
     }
     // Write a snapshot of the open segment without closing it, so a crash loses
     // at most flushIntervalMs (N-REL-01). Marked provisional so the final row
-    // replaces it instead of stacking on top.
-    this.#writeRow({ ...open, endedAt: now, provisional: true });
+    // replaces it instead of stacking on top. Split at midnight here too: this
+    // is the path that runs every 10 s, and an unsplit open segment crossed
+    // midnight inflated yesterday and left today at zero (round-12).
+    for (const part of splitAtMidnight({ ...open, endedAt: now, provisional: true })) {
+      this.#writeRow(part);
+    }
     this.#lastFlushAt = now;
     this.#lastEventAt = this.#lastEventAt ?? now;
   }
@@ -366,37 +422,47 @@ export class TimeCollector {
 
   #writeRow(seg: FocusSegment): void {
     const date = localDateKey(new Date(seg.startedAt));
+    // Delete first: a provisional row written before the app was excluded must
+    // not survive the exclusion (round-12 nit).
+    this.#db.run(
+      "DELETE FROM focus_event WHERE session_id = ? AND source LIKE ?",
+      this.#opts.sessionId,
+      "%:snapshot",
+    );
     // An excluded app is not tracked at all: no row, no aggregate contribution.
     if (this.#excluded.has(TimeCollector.#normalizeClass(seg.appClass))) return;
+    // A backward clock step or a corrupt row must not become negative or
+    // multi-day focused time; cap implausible spans at 12 hours.
+    const rawMs = seg.endedAt - seg.startedAt;
+    if (!Number.isFinite(rawMs) || rawMs < 0) return;
+    const endedAt = rawMs > MAX_SEGMENT_MS ? seg.startedAt + MAX_SEGMENT_MS : seg.endedAt;
     try {
-      // A snapshot row for an still-open segment is provisional: remove it
-      // before writing the final row so the range is never counted twice.
-      this.#db.run(
-        "DELETE FROM focus_event WHERE started_at = ? AND source LIKE ?",
-        seg.startedAt,
-        "%:snapshot",
-      );
       const source = seg.provisional ? `${seg.source}:snapshot` : seg.source;
-      this.#db.run(
-        `INSERT INTO focus_event
-           (started_at, ended_at, local_date, app_class, app_title, workspace_id, monitor_id, source, session_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
-        seg.startedAt,
-        seg.endedAt,
-        date,
-        seg.appClass,
-        seg.appTitle,
-        seg.workspaceId,
-        source,
-        this.#opts.sessionId,
-        Date.now(),
-      );
-      this.#segmentsWritten++;
+      // One transaction per row (and its site attribution): a crash between the
+      // delete and the insert used to lose the whole closed segment.
+      this.#db.transaction(() => {
+        this.#db.run(
+          `INSERT INTO focus_event
+             (started_at, ended_at, local_date, app_class, app_title, workspace_id, monitor_id, source, session_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+          seg.startedAt,
+          endedAt,
+          date,
+          seg.appClass,
+          seg.appTitle,
+          seg.workspaceId,
+          source,
+          this.#opts.sessionId,
+          Date.now(),
+        );
+        // Only the final row carries the real duration, the site attribution,
+        // and the segment count.
+        if (!seg.provisional) {
+          this.#attributeSite({ ...seg, endedAt }, date);
+          this.#segmentsWritten++;
+        }
+      });
       this.#dirtyDates.add(date);
-      // Only the final row carries the real duration. A provisional snapshot is
-      // re-written every flush interval at the same key, so attributing it
-      // would leave the site row stuck at one interval's worth of time.
-      if (!seg.provisional) this.#attributeSite(seg, date);
     } catch (err) {
       this.#error = err instanceof Error ? err.message : String(err);
     }
@@ -428,7 +494,7 @@ export class TimeCollector {
         `https://${guess.site}/`,
         pageTitle(seg.appTitle),
         guess.site,
-        BigInt(seg.startedAt) * 1000n,
+        BigInt(msToChromeTime(seg.startedAt)),
         seg.startedAt,
         localDate,
         BigInt(seconds) * 1_000_000n,
@@ -449,14 +515,17 @@ export class TimeCollector {
     const row = this.#db.get<{ id: number }>(
       "SELECT id FROM browser_profile WHERE profile_dir = '__window_title__'",
     );
-    this.#titleProfile = row?.id ?? 0;
+    // No 0 sentinel: with foreign keys ON a cached 0 makes every later insert
+    // fail permanently (round-12 nit).
+    if (!row) throw new Error("failed to register the window-title profile");
+    this.#titleProfile = row.id;
     return this.#titleProfile;
   }
 
   #rebuildDirty(): void {
     for (const date of this.#dirtyDates) {
       try {
-        rebuildDay(this.#db, date);
+        rebuildDay(this.#db, date, this.#opts.readingSeconds?.(date) ?? 0);
       } catch (err) {
         this.#error = err instanceof Error ? err.message : String(err);
       }

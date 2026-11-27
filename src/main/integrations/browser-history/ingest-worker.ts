@@ -26,7 +26,6 @@ export interface IngestRequest {
   dbPath: string;
   snapshotDir: string;
   profiles: ProfileConfig[];
-  maxRows?: number;
 }
 
 export type IngestReply = { type: "result"; results: IngestResult[] } | { type: "error"; message: string };
@@ -38,7 +37,6 @@ function handle(req: IngestRequest): IngestReply {
     const ingest = new BrowserHistoryIngest({
       db,
       snapshotDir: req.snapshotDir,
-      maxRows: req.maxRows,
     });
     return { type: "result", results: ingest.ingestAll(req.profiles) };
   } catch (err) {

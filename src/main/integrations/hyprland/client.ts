@@ -15,6 +15,8 @@ import { parseActiveWindow, parseActiveWindowV2, parseEventLine, splitLines } fr
 export interface HyprlandClientOptions {
   signature?: string;
   runtimeDir?: string;
+  /** Full socket path, for tests and non-standard layouts. */
+  socketPath?: string;
   onFocus: (appClass: string, appTitle: string) => void;
   onTitle: (title: string) => void;
   onWorkspace: (workspaceId: string) => void;
@@ -40,7 +42,12 @@ export class HyprlandClient {
     const sig = opts.signature ?? process.env.HYPRLAND_INSTANCE_SIGNATURE ?? "";
     const runtime =
       opts.runtimeDir ?? process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
-    this.socketPath = join(runtime, "hypr", sig, ".socket2.sock");
+    this.socketPath = opts.socketPath ?? join(runtime, "hypr", sig, ".socket2.sock");
+  }
+
+  /** Prime the focused-window gate after a (re)connect. */
+  setFocusedAddress(address: string | null): void {
+    this.#focusedAddress = address;
   }
 
   get connected(): boolean {
@@ -85,8 +92,12 @@ export class HyprlandClient {
 
     socket.on("close", () => {
       if (this.#socket === socket) this.#socket = null;
-      this.#opts.onDisconnected("closed");
+      // A title event after a reconnect belongs to a window whose address is
+      // unknown; drop the stale gate rather than discarding the focused
+      // window's own tab changes until the next focus event.
+      this.#focusedAddress = null;
       if (this.#stopped) return;
+      this.#opts.onDisconnected("closed");
       const delay = this.#backoff;
       this.#backoff = Math.min(this.#backoff * 2, BACKOFF_MAX);
       this.#timer = setTimeout(() => this.#connect(), delay);

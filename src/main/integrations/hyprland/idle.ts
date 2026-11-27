@@ -65,12 +65,16 @@ export async function readDpmsOff(): Promise<boolean> {
  * happened to set the hint, which is not the same thing and is not in our
  * control. An AFK afternoon with a window focused was billed as focus.
  *
+ * Electron takes the threshold in **seconds** while the collector is configured
+ * in milliseconds; passing 120_000 asked for 33 hours and always answered
+ * "active" (round-12). The conversion is explicit here.
+ *
  * Returns null when the answer is unavailable, so the caller falls back to the
  * lock hint rather than treating "unknown" as "present" or as "away".
  */
 export function isIdleBeyond(thresholdMs: number): boolean | null {
   try {
-    const state = powerMonitor.getSystemIdleState(thresholdMs);
+    const state = powerMonitor.getSystemIdleState(Math.max(1, Math.round(thresholdMs / 1000)));
     // `locked` counts as away: the session is not in use either way.
     if (state === "active") return false;
     if (state === "idle" || state === "locked") return true;

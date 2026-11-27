@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { app } from "electron";
 import type {
+  ActivityCellView,
   AnalyticsView,
   AppUsage,
   BackupStatusView,
@@ -17,22 +18,24 @@ import type {
   HealthReport,
   HourBucketView,
   IngestSummaryView,
+  PrayerMarker,
   SystemSettingsView,
   ThemeTokens,
   TimelineSegment,
 } from "../../shared/api";
+import { localDateKey } from "../../shared/dates";
 import { autostartEnabled } from "../autostart";
 import { Db } from "../db/driver";
 import { currentVersion, migrate } from "../db/migrate";
 import type { IngestResult } from "../integrations/browser-history/ingest";
 import {
-  BrowserHistoryIngest,
   cleanupSnapshots,
   type ProfileConfig,
   seedDefaultRules,
   strategyFor,
 } from "../integrations/browser-history/ingest";
 import type { IngestReply, IngestRequest } from "../integrations/browser-history/ingest-worker";
+import { guessSite, isBrowserClass } from "../integrations/browser-history/title";
 import { readTheme } from "../integrations/omarchy-theme";
 import { formatHijri } from "../integrations/salah/compute";
 import { daysToRebuild, summarizeDay } from "../modules/dashboard/summary";
@@ -42,10 +45,10 @@ import { HabitsService } from "../modules/habits/service";
 import { NotesService } from "../modules/notes/service";
 import { ReadingService } from "../modules/reading/service";
 import { SalahService } from "../modules/salah/service";
-import { localDateKey } from "../modules/time/aggregate";
-import { analyse, hourlyProfile, topDomains } from "../modules/time/analytics";
+import { activityMatrix, analyse, hourlyProfile, topDomains } from "../modules/time/analytics";
 import { TimeCollector } from "../modules/time/collector";
 import {
+  categoryForDomain,
   categoryUsage,
   pagesForDomain,
   setDomainRule,
@@ -118,7 +121,6 @@ export class Services {
   readonly notes: NotesService;
   readonly goals: GoalsService;
   readonly backup: BackupService;
-  readonly history: BrowserHistoryIngest;
   #backupTimer: NodeJS.Timeout | null = null;
   #integrity = "unchecked";
   #integrityAt: number | null = null;
@@ -146,17 +148,21 @@ export class Services {
     this.db = Db.open(this.dbPath);
     migrate(this.db);
     this.#theme = readTheme();
-    this.collector = new TimeCollector(this.db, { sessionId: detectSessionId() });
+    this.collector = new TimeCollector(this.db, {
+      sessionId: detectSessionId(),
+      // The reading module owns reading_session; time asks it for the day total
+      // instead of reading its table (PRD P-1). The closure is lazy because
+      // `reading` is constructed just below.
+      readingSeconds: (date) => this.reading?.readingSeconds(date) ?? 0,
+    });
     this.habits = new HabitsService(this.db);
     this.salah = new SalahService(this.db);
     this.reading = new ReadingService(this.db, join(userDataDir, "library"));
     this.notes = this.openNotes(join(userDataDir, "notes-index.sqlite"));
     this.goals = new GoalsService(this.db);
     this.backup = new BackupService(this.db, join(userDataDir, "backups"));
-    this.history = new BrowserHistoryIngest({
-      db: this.db,
-      snapshotDir: join(userDataDir, "snapshots"),
-    });
+    // The ingest itself runs in the worker (STACK §4.1); the main process only
+    // supervises it, so no BrowserHistoryIngest is constructed here.
     seedDefaultRules(this.db);
   }
 
@@ -263,6 +269,9 @@ export class Services {
         this.#ingestPending = null;
         this.#ingestWorker = null;
         void worker.terminate();
+        // The snapshot is deleted on the normal path; a timeout must not leave
+        // up to 800 MB behind until the next launch (F-TIME-17).
+        cleanupSnapshots(join(this.userDataDir, "snapshots"));
         resolve(null);
       }, INGEST_TIMEOUT_MS);
       this.#ingestPending = (reply) => {
@@ -396,8 +405,13 @@ export class Services {
     return analyse(this.db, days);
   }
 
-  hourly(localDate?: string): HourBucketView[] {
-    return hourlyProfile(this.db, localDate ?? localDateKey(new Date()));
+  /** F-TIME-09: 7×24 activity matrix. */
+  activity(days = 7): ActivityCellView[] {
+    return activityMatrix(this.db, days);
+  }
+
+  hourly(localDate: string): HourBucketView[] {
+    return hourlyProfile(this.db, localDate);
   }
 
   domains(days = 30): DomainUsageView[] {
@@ -531,8 +545,19 @@ export class Services {
       prayersLogged: prayers?.n ?? 0,
       hijri: salahHijri.value ?? formatHijri(new Date()),
       hijriSource: salahHijri.value ? salahHijri.source : "computed",
-      watchSeconds: watchTime(this.db, localDate).seconds,
+      watchSeconds: watchTime(this.db, localDate, siteUsage(this.db, localDate)).seconds,
     });
+  }
+
+  /** F-DASH-02: prayer markers for the timeline overlay. */
+  async prayerMarkers(localDate: string): Promise<PrayerMarker[]> {
+    const day = await this.salah.day(localDate);
+    const logs = new Map(day.prayers.map((p) => [p.id, p.status]));
+    return day.source_times.prayers.map((p) => ({
+      prayer: p.id,
+      time: p.time,
+      status: logs.get(p.id) ?? null,
+    }));
   }
 
   timeline(localDate: string): TimelineSegment[] {
@@ -549,6 +574,10 @@ export class Services {
         appClass: r.app_class,
         appTitle: r.app_title ?? "",
         seconds: Math.max(0, Math.round((r.ended_at - r.started_at) / 1000)),
+        // F-DASH-02: colour the band by category, not only by app class.
+        category: isBrowserClass(r.app_class)
+          ? categoryForDomain(this.db, guessSite(r.app_title ?? "")?.site ?? "")
+          : "App",
       }));
   }
 

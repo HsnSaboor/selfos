@@ -17,6 +17,8 @@ function testDb(): Db {
     CREATE TABLE day_aggregate (
       local_date TEXT PRIMARY KEY, screen_seconds INTEGER, focused_seconds INTEGER,
       media_seconds INTEGER, reading_seconds INTEGER, switches INTEGER,
+      focus_sessions INTEGER NOT NULL DEFAULT 0,
+      longest_focus_seconds INTEGER NOT NULL DEFAULT 0,
       first_activity INTEGER, last_activity INTEGER, rebuilt_at INTEGER
     );
   `);
@@ -102,7 +104,7 @@ describe("computeDayAggregate", () => {
   it("includes reading session seconds", () => {
     addFocus(db, 0, H, "selfos");
     db.run("INSERT INTO reading_session (local_date, active_seconds) VALUES (?, ?)", DAY, 900);
-    expect(computeDayAggregate(db, DAY).readingSeconds).toBe(900);
+    expect(computeDayAggregate(db, DAY, 900).readingSeconds).toBe(900);
   });
 
   it("is isolated per day", () => {

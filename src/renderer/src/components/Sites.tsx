@@ -71,19 +71,23 @@ export function SitesView({ localDate }: { localDate: string }) {
   const [pages, setPages] = useState<PageUsageView[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [ingest, setIngest] = useState<IngestSummaryView[]>([]);
+  const [uncategorized, setUncategorized] = useState<Array<{ domain: string; seconds: number }>>([]);
+  const [bulkCategory, setBulkCategory] = useState("Entertainment");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [s, last] = await Promise.all([
+    const [s, last, un] = await Promise.all([
       window.selfos.invoke("sites.day", { localDate }),
       window.selfos.invoke("sites.lastIngest", undefined),
+      window.selfos.invoke("sites.uncategorized", { limit: 50 }),
     ]);
     // One message per load, committed once: setting on failure and never
     // clearing left the banner up after a later load succeeded.
     const failure = !s.ok ? s.error : !last.ok ? `ingest status: ${last.error}` : null;
     if (s.ok) setData(s.data);
     if (last.ok) setIngest(last.data);
+    if (un.ok) setUncategorized(un.data);
     setError(failure);
   }, [localDate]);
 
@@ -241,7 +245,79 @@ export function SitesView({ localDate }: { localDate: string }) {
                   />
                 </span>
                 <span className="app-time">{formatDuration(w.seconds)}</span>
-                <span className="app-share">{w.visits}</span>
+              </div>
+            ))}
+          </div>
+          {data.watch.byTitle.length > 0 ? (
+            <>
+              <p className="muted panel-note">By title</p>
+              <div className="top-apps">
+                {data.watch.byTitle.slice(0, 10).map((t) => (
+                  <div key={t.title} className="app-row">
+                    <span className="app-name" title={t.title}>
+                      {t.title}
+                    </span>
+                    <span className="app-bar">
+                      <span
+                        style={{
+                          width: `${(t.seconds / Math.max(1, data.watch.seconds)) * 100}%`,
+                          background: "var(--c-red, #ea6962)",
+                        }}
+                      />
+                    </span>
+                    <span className="app-time">{formatDuration(t.seconds)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {uncategorized.length > 0 ? (
+        <section className="panel">
+          <h2>Uncategorized domains</h2>
+          <p className="muted panel-note">
+            Bulk-categorise the domains the rules do not cover (F-TIME-07). Each one keeps its own
+            distracting/media flags.
+          </p>
+          <div className="form-row">
+            <select
+              className="input"
+              value={bulkCategory}
+              onChange={(e) => setBulkCategory(e.target.value)}
+              aria-label="Category for uncategorized domains"
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                for (const d of uncategorized) {
+                  await window.selfos.invoke("sites.categorize", {
+                    domain: d.domain,
+                    category: bulkCategory,
+                  });
+                }
+                setBusy(false);
+                await load();
+              }}
+            >
+              Apply to all {uncategorized.length}
+            </button>
+          </div>
+          <div className="top-apps">
+            {uncategorized.slice(0, 20).map((d) => (
+              <div key={d.domain} className="app-row">
+                <span className="app-name">{d.domain}</span>
+                <span className="app-time">{formatDuration(d.seconds)}</span>
               </div>
             ))}
           </div>

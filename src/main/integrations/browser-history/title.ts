@@ -21,38 +21,9 @@ export interface SiteGuess {
   basis: "suffix" | "hostname";
 }
 
-/**
- * Title suffixes that name a site. Ordered longest-first so
- * "Google Docs" wins over "Google".
- */
-const SUFFIX_SITES: Array<[RegExp, string]> = [
-  [/\bYouTube\s*(?:Music|Shorts)?$/i, "youtube.com"],
-  [/\bNetflix$/i, "netflix.com"],
-  [/\bTwitch$/i, "twitch.tv"],
-  [/\bVimeo$/i, "vimeo.com"],
-  [/\bGitHub$/i, "github.com"],
-  [/\bGitLab$/i, "gitlab.com"],
-  [/\bReddit$/i, "reddit.com"],
-  [/\bX$/i, "x.com"],
-  [/\bInstagram$/i, "instagram.com"],
-  [/\bFacebook$/i, "facebook.com"],
-  [/\bLinkedIn$/i, "linkedin.com"],
-  [/\bGoogle Docs$/i, "docs.google.com"],
-  [/\bGoogle Drive$/i, "drive.google.com"],
-  [/\bGmail$/i, "mail.google.com"],
-  [/\bGoogle Search$/i, "google.com"],
-  [/\bGoogle$/i, "google.com"],
-  [/\bWikipedia$/i, "wikipedia.org"],
-  [/\bStack Overflow$/i, "stackoverflow.com"],
-  [/\bChatGPT$/i, "chatgpt.com"],
-  [/\bClaude$/i, "claude.ai"],
-  [/\bFigma$/i, "figma.com"],
-  [/\bNotion$/i, "notion.so"],
-  [/\bPrime Video$/i, "primevideo.com"],
-  [/\bDisney\+$/i, "disneyplus.com"],
-  [/\bCrunchyroll$/i, "crunchyroll.com"],
-  [/\bOpenFront(?:\s*\(ALPHA\))?$/i, "openfront.io"],
-];
+export { SUFFIX_SITES } from "./catalog";
+
+import { SUFFIX_SITES } from "./catalog";
 
 /**
  * Chromium appends the browser's own name to every window title

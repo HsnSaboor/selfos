@@ -142,17 +142,17 @@ describe("strategyFor", () => {
     expect(strategyFor("/nope/History")).toBe("unavailable");
   });
 
-  it("uses immutable with no journal", () => {
+  it("always uses a private snapshot copy", () => {
     const dir = tempDir("selfos-strategy-");
     writeFileSync(join(dir, "History"), "x");
-    expect(strategyFor(join(dir, "History"))).toBe("immutable");
+    expect(strategyFor(join(dir, "History"))).toBe("snapshot");
   });
 
-  it("uses immutable for a zero-byte journal left by a clean close", () => {
+  it("uses a snapshot for a zero-byte journal left by a clean close", () => {
     const dir = tempDir("selfos-strategy-");
     writeFileSync(join(dir, "History"), "x");
     writeFileSync(join(dir, "History-journal"), "");
-    expect(strategyFor(join(dir, "History"))).toBe("immutable");
+    expect(strategyFor(join(dir, "History"))).toBe("snapshot");
   });
 
   it("uses a snapshot for a live journal", () => {
@@ -238,7 +238,7 @@ describe("BrowserHistoryIngest", () => {
     const res = ingest.ingest({ browser: "helium", profileDir: "Default", historyPath: path });
     expect(res.error).toBeNull();
     expect(res.rowsNew).toBe(2);
-    expect(res.strategy).toBe("immutable");
+    expect(res.strategy).toBe("snapshot");
 
     const rows = db.all<{ domain: string; local_date: string; duration_us: string }>(
       "SELECT domain, local_date, duration_us FROM browser_visit ORDER BY visit_at",
@@ -303,7 +303,7 @@ describe("BrowserHistoryIngest", () => {
   });
 
   it("advances the watermark even when rows are skipped", () => {
-    // A reload row is skipped, but its timestamp must still move the watermark
+    // A non-web row is skipped, but its timestamp must still move the watermark
     // or it is re-read forever.
     const path = fakeHistory([
       { url: "https://a.com/", title: "A", atMs: T0, durationUs: 1_000_000n },
@@ -331,15 +331,15 @@ describe("BrowserHistoryIngest", () => {
     expect(res.rowsNew).toBe(1);
   });
 
-  it("skips non-web URLs and reloads", () => {
+  it("skips non-web URLs and keeps reloads", () => {
     const path = fakeHistory([
       { url: "chrome://settings", title: "Settings", atMs: T0, durationUs: 5_000_000n },
       { url: "https://reloaded.com/", title: "R", atMs: T0 + 1000, durationUs: 9_000_000n, transition: 8 },
       { url: "https://real.com/", title: "Real", atMs: T0 + 2000, durationUs: 4_000_000n },
     ]);
     const res = ingest.ingest({ browser: "helium", profileDir: "Default", historyPath: path });
-    expect(res.rowsNew).toBe(1);
-    expect(res.rowsSkipped).toBe(2);
+    expect(res.rowsNew).toBe(2);
+    expect(res.rowsSkipped).toBe(1);
   });
 
   it("keeps zero-duration visits (they still record a visit)", () => {
@@ -351,7 +351,7 @@ describe("BrowserHistoryIngest", () => {
     const path = fakeHistory([{ url: "https://a.com/", title: "A", atMs: T0 }]);
     ingest.ingest({ browser: "helium", profileDir: "Default", historyPath: path });
     const run = db.get<{ strategy: string; finished_at: number | null }>("SELECT * FROM ingest_run");
-    expect(run?.strategy).toBe("immutable");
+    expect(run?.strategy).toBe("snapshot");
     expect(run?.finished_at).not.toBeNull();
   });
 
@@ -495,8 +495,8 @@ describe("siteUsage", () => {
     expect(site?.source).toBe("mixed");
     expect(site?.historySeconds).toBe(100);
     expect(site?.titleSeconds).toBe(140);
-    // The larger of the two, never the sum.
-    expect(site?.seconds).toBe(140);
+    // The union of the two interval sets: disjoint here, so 100 + 140.
+    expect(site?.seconds).toBe(240);
   });
 
   it("reports window-title-only sites", () => {

@@ -66,6 +66,10 @@ export interface DaySummary {
   firstActivity: number | null;
   lastActivity: number | null;
   switches: number;
+  /** F-TIME-08: contiguous same-app runs of at least five minutes. */
+  focusSessions: number;
+  /** F-TIME-10: longest single focus stretch, seconds. */
+  longestFocusSeconds: number;
 }
 
 export interface HealthReport {
@@ -115,6 +119,14 @@ export interface TimelineSegment {
   appClass: string;
   appTitle: string;
   seconds: number;
+  /** F-DASH-02: category label for the band colour. */
+  category: string;
+}
+
+export interface PrayerMarker {
+  prayer: PrayerId;
+  time: string;
+  status: PrayerStatus | null;
 }
 
 export interface AppUsage {
@@ -511,6 +523,16 @@ export interface AnalyticsView {
   worstDay: DayPointView | null;
   longestStreak: number;
   currentStreak: number;
+  /** Screen time in the preceding period of equal length (F-TIME-09). */
+  previousScreenSeconds: number;
+  /** Percent change vs that period; null when it had no activity. */
+  screenDeltaPct: number | null;
+}
+
+export interface ActivityCellView {
+  weekday: number;
+  hour: number;
+  seconds: number;
 }
 
 export interface HourBucketView {
@@ -582,7 +604,11 @@ export interface SitesView {
   sites: SiteUsageView[];
   totals: SiteTotalsView;
   categories: CategoryUsageView[];
-  watch: { seconds: number; bySite: Array<{ domain: string; seconds: number; visits: number }> };
+  watch: {
+    seconds: number;
+    bySite: Array<{ domain: string; seconds: number }>;
+    byTitle: Array<{ title: string; seconds: number }>;
+  };
 }
 
 export interface PageUsageView {
@@ -687,6 +713,7 @@ export interface Api {
     params: { prayer: PrayerId; count?: number };
     result: { byPrayer: Record<PrayerId, number>; total: number };
   };
+  "salah.markers": { params: { localDate?: string }; result: PrayerMarker[] };
   "salah.history": {
     params: { days?: number };
     result: Array<{ localDate: string; logged: number; missed: number; excused: number }>;
@@ -755,6 +782,7 @@ export interface Api {
   "goals.reopen": { params: { goalId: number }; result: { ok: true } };
 
   "analytics.range": { params: { days?: number }; result: AnalyticsView };
+  "analytics.activity": { params: { days?: number }; result: ActivityCellView[] };
   "analytics.hourly": { params: { localDate?: string }; result: HourBucketView[] };
   "analytics.domains": { params: { days?: number }; result: DomainUsageView[] };
 
@@ -829,6 +857,7 @@ export const API_CHANNELS = [
   "analytics.domains",
   "analytics.hourly",
   "analytics.range",
+  "analytics.activity",
   "backup.create",
   "backup.restore",
   "backup.status",
@@ -888,6 +917,7 @@ export const API_CHANNELS = [
   "salah.day",
   "salah.history",
   "salah.log",
+  "salah.markers",
   "salah.repayQada",
   "sites.categorize",
   "sites.day",

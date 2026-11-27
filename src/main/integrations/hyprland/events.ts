@@ -18,7 +18,7 @@ export interface FocusSegment {
   appClass: string;
   appTitle: string;
   workspaceId: string | null;
-  source: "hypr-ipc" | "hyprctl-reconcile";
+  source: "hypr-ipc" | "hyprctl-reconcile" | "title-site-change";
   /** Set on snapshot rows that the final row will replace. */
   provisional?: boolean;
 }
@@ -177,8 +177,10 @@ export class SegmentMerger {
     if (pending) {
       const contiguous = pending.endedAt === seg.startedAt;
       const sameApp = pending.appClass === seg.appClass && pending.appTitle === seg.appTitle;
-      if (sameApp) {
-        // Redundant activewindow event: extend the pending run in place.
+      if (sameApp && contiguous) {
+        // Redundant activewindow event: extend the pending run in place. A
+        // same-app segment after a hole is a new run, not a continuation —
+        // merging across the hole invents time (round-12 nit).
         pending.endedAt = seg.endedAt;
         return out;
       }

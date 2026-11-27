@@ -246,9 +246,9 @@ CREATE TABLE focus_event (
   local_date   TEXT    NOT NULL,
   app_class    TEXT    NOT NULL,          -- Hyprland 'class'
   app_title    TEXT,
-  workspace_id INTEGER,
+  workspace_id TEXT,
   monitor_id   INTEGER,
-  source       TEXT    NOT NULL,          -- 'hypr-ipc' | 'hyprctl-reconcile'
+  source       TEXT    NOT NULL,          -- 'hypr-ipc' | 'hyprctl-reconcile' | 'title-site-change'
   session_id   TEXT,                      -- login session
   created_at   INTEGER NOT NULL
 );
@@ -260,7 +260,7 @@ CREATE TABLE browser_profile (
   browser       TEXT NOT NULL,            -- 'helium'
   profile_dir   TEXT NOT NULL UNIQUE,     -- 'Default', 'Profile 2'
   history_path  TEXT NOT NULL,
-  watermark_us  INTEGER NOT NULL DEFAULT 0, -- max visits.visit_time ingested
+  watermark_us  TEXT NOT NULL DEFAULT '0', -- max visits.visit_time ingested (Chrome µs, 1601)
   last_ingest_at INTEGER
 );
 
@@ -270,11 +270,12 @@ CREATE TABLE browser_visit (
   url            TEXT NOT NULL,
   title          TEXT,
   domain         TEXT NOT NULL,
-  visit_time_us  INTEGER NOT NULL,        -- Chromium µs since 1601
+  visit_time_us  TEXT NOT NULL,        -- Chromium µs since 1601 (both sources)
   visit_at       INTEGER NOT NULL,        -- UTC ms, converted
   local_date     TEXT NOT NULL,
   duration_us    INTEGER NOT NULL DEFAULT 0,
   transition     INTEGER NOT NULL DEFAULT 0,
+  source         TEXT NOT NULL DEFAULT 'history', -- 'history' | 'window-title'
   ingest_run_id  INTEGER,
   UNIQUE(profile_id, url, visit_time_us)  -- idempotent ingest (F-TIME-13)
 );
@@ -486,6 +487,7 @@ CREATE TABLE day_aggregate (
 - Streaks, totals, and goal progress are computed by pure functions from raw rows; `day_aggregate` is the only cache and is rebuildable via a health-page action (D-03, F-SET-07).
 - Aggregation runs incrementally: the collector recomputes the affected `local_date` rows after each ingest/close, so the dashboard never scans raw tables (N-PERF-06).
 - `VACUUM INTO '<backup>'` for consistent hot backups (F-SET-04).
+- Constants that decide the numbers: `SWITCH_NOISE_MS = 15_000` (segments shorter than this are screen time but not focused time), `FOCUS_SESSION_MIN_MS = 300_000` (a contiguous same-app run must reach five minutes to count as a focus session, F-TIME-08), and `MEDIA_CLASSES = /^(mpv|vlc|celluloid|haruna|smplayer)$/i` (an unlisted player counts as focused, never media).
 
 ### 4.5 Backup and export
 
@@ -513,7 +515,7 @@ systemd --user  (or Electron main for v1 — see below)
  └── selfos-collector    (Node)          → focus_event, browser_visit, day_aggregate
 ```
 
-**Why a separate collector process:** tracking must survive closing the app window (F-SHELL-04) and must restart independently of a UI crash (F-TIME-11, N-REL-04). Both processes open the DB with WAL and short write transactions.
+**Why a separate collector process (target, not shipped):** the intent is that tracking survives closing the window (F-SHELL-04) and restarts independently of a UI crash (F-TIME-11, N-REL-04). The collector is a class inside the main process today, so a main-process crash stops tracking until relaunch; moving it to a `utilityProcess`/systemd unit is the remaining work. Both processes would open the DB with WAL and short write transactions.
 
 **v1 simplification:** the collector may run as a `utilityProcess` (Electron's Node child) supervised by the main process, with the systemd unit as the supervisor for the whole app. This keeps one install artifact and one log stream; the collector module itself stays process-agnostic so it can be split into its own unit later.
 
@@ -528,12 +530,10 @@ Subscribed events (all verified live in SP-3 — 45 events, 10 focus transitions
 | Event | Use |
 |---|---|
 | `activewindow>>CLASS,TITLE` | Open/close a focus segment |
-| `activewindowv2>>ADDRESS` | Fallback when the title is empty |
-| **`windowtitle>>ADDRESS` / `windowtitlev2>>ADDRESS,TITLE`** | **Page change within the same focused window** — fires on browser tab/title change without re-focusing (SP-3). Use it to update the current segment's title for F-TIME-05 |
-| `openwindow>>…` / `closewindow>>…` | Detect the focused window disappearing |
-| `workspace>>…` / `focusedmon>>…` | Attribute context; detect workspace switches |
-| `movewindow>>…` / `activelayout>>…` | Context only |
-| `monitorremoved` / `monitoradded` | Reconcile after hot-plug |
+| `activewindowv2>>ADDRESS` | Prime the focused-window gate; also the fallback when the title is empty |
+| **`windowtitle>>ADDRESS` / `windowtitlev2>>ADDRESS,TITLE`** | **Page change within the same focused window** — fires on browser tab/title change without re-focusing (SP-3). A change of inferred *site* closes and reopens the segment; a same-site change retitles it |
+| `workspace>>…` / `workspacev2>>…` | Attribute context; detect workspace switches |
+| `openwindow`, `closewindow`, `focusedmon`, `movewindow`, `activelayout`, `monitoradded`, `monitorremoved` | **Received and counted only** (`eventCounts` in the health page); no behaviour depends on them today |
 
 **Hyprland 0.56 dispatch change:** `hyprctl dispatch <name> <args>` no longer works — 0.56 replaced it with a Lua API. The collector does **not** dispatch, but any test harness or automation must use `hl.dispatch(hl.dsp.*)` (e.g. `hl.dispatch(hl.dsp.window.bring_to_top({class="helium"}))`). Real events come from launching windows or switching focus; a no-op dispatch produces none.
 
@@ -547,7 +547,7 @@ Algorithm:
 
 **Idle / lock detection** (F-TIME-02): see §2.6 — `loginctl` every 5 s is the Linux authority; `powerMonitor` provides immediate suspend/resume/shutdown.
 
-**Pause:** a file flag `$XDG_RUNTIME_DIR/selfos/tracking.paused` toggled by the tray (F-TIME-16); the collector checks it before writing.
+**Pause:** an in-memory flag set through `system.pauseTracking` (tray or UI); the collector closes the open segment and writes no rows while paused. A restart does not preserve it.
 
 ### 5.3 Browser history ingest
 
@@ -568,7 +568,7 @@ Algorithm:
 
 1. Check for `History-journal` next to the DB.
 2. **No journal** → open `file:…?immutable=1` read-only and ingest directly (fast path).
-3. **Journal present** → copy to `$XDG_CACHE_HOME/selfos/hist-snapshot-<profile>.sqlite`, read the copy, then delete it. Copy is allowed **only** for this consistency purpose and is never retained.
+3. **Journal present (or a live writer possible)** → copy the DB **and its `-journal`/`-wal`/`-shm`** to `$XDG_CACHE_HOME/selfos/hist-snapshot-<profile>.sqlite`, open the copy read-write so SQLite recovers the hot journal, read it, then delete it. The copy is allowed **only** for this consistency purpose and is never retained. An immutable open is not used: it ignores a journal and can read a torn B-tree.
 4. Copying is **never** on a short timer against a 433 MB file. It runs at most every four hours (≈6 times a day), in the worker thread, with a hard-coded 800 MB ceiling (`MAX_SNAPSHOT_BYTES`); an abort is reported on the Sites page, not the health page.
 5. Read only rows above `watermark_us`:
    ```sql
@@ -578,6 +578,7 @@ Algorithm:
    ORDER BY v.visit_time
    LIMIT 5000;
    ```
+   The first run backfills at most `BACKFILL_DAYS = 90` days, and one run drains at most `MAX_PAGES_PER_RUN = 10` pages (50 000 rows). A page that returns fewer than 5 000 rows ends the drain. Reload visits are **kept** (Chromium gives the reload its own interval); the insert upserts `duration_us = MAX(existing, new)` so a visit first seen while still open is refreshed on a later pass.
 6. Insert in batches of 500 inside **explicit** `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` — `node:sqlite` has **no `db.transaction()` helper** (SP-1). `UNIQUE(profile_id, url, visit_time_us)` makes re-runs idempotent (F-TIME-13).
 7. Advance `watermark_us` only after the transaction commits (N-REL-01).
 8. Run ingest in a **worker thread**, not on the main IPC loop (N-PERF-04).
@@ -593,13 +594,13 @@ const chromeToMs = (us: bigint) => Number(us / 1000n) - CHROME_EPOCH_OFFSET_MS;
 
 A real `visit_time` observed on this machine is `13_438_067_778_302_716`, which is **1.34 × 10¹⁶** — larger than JavaScript's `Number.MAX_SAFE_INTEGER` (9.007 × 10¹⁵). Read as a plain `number`, low-order digits are silently lost, so two visits in the same millisecond can collide and the unique key becomes unreliable. Therefore call `statement.setReadBigInts(true)` on the ingest statement so `visit_time` arrives as a `bigint`, and keep it a `bigint` into the insert. This gets a dedicated test.
 
-**Media classification** (F-TIME-06): a `domain_rule` + URL-pattern pass marks `youtube.com/watch`, `/shorts/`, `netflix.com/watch`, `twitch.tv/*`, `vimeo.com/*`, etc. as media; the title is stored for per-title breakdown.
+**Media classification** (F-TIME-06): `MEDIA_RULES` marks `youtube.com/watch`, `/shorts/`, `netflix.com/watch`, `twitch.tv/*`, `vimeo.com/*`, etc. as media, and a `domain_rule.is_media` set by the user is honoured for both history and window-title rows. The title is stored for the per-title breakdown.
 
-**Fallback when history is unavailable** (F-TIME-05): parse the focused window title. Observed titles follow `… - YouTube`, `… | Figma`, `… - Google Search` (local evidence). The parser:
-1. splits on the last ` - ` / ` | ` separator;
-2. maps the suffix to a known site;
-3. maps the focused window's `app_class` (`helium`) to the browser;
-4. attributes **focused seconds** to that inferred site.
+**Fallback when history is unavailable** (F-TIME-05): parse the focused window title. The parser:
+1. strips a trailing browser suffix (` - Helium`);
+2. tries the last ` - ` / ` | ` segment and then the whole title;
+3. maps the candidate through `SUFFIX_SITES`, then falls back to the hostname with an extension denylist (`.md`, `.exe`, …);
+4. maps the focused window's `app_class` (`helium`) to the browser and attributes **focused seconds** to that site.
 
 Every row carries `source` (`history` vs `window-title`) so the UI can show provenance (D-05, F-TIME-05).
 
@@ -869,11 +870,11 @@ Every handler validates its input with hand-written guards and returns a discrim
 | F-SHELL-01…10 (shell, tray, lifecycle) | Electron windows/tray + single-instance lock + XDG autostart | §2.3, §2.5, §3.3 |
 | F-READ-01…18 (reading) | pdf.js + react-pdf-highlighter + overrides + anchoring | §6 |
 | F-HABIT-01…15 (habits) | Pure functions + versioned schedules | §7 |
-| F-TIME-01…16 (screen/watch time) | Hyprland IPC + history ingest + rules | §5.2, §5.3 |
+| F-TIME-01…16 (screen/watch time) | Hyprland IPC + history ingest + rules; F-TIME-08 sessions and F-TIME-09 7×24 matrix shipped; F-TIME-11 crash supervision, F-TIME-12 and F-TIME-15 are open | §5.2, §5.3 |
 | F-SALAH-01…12 (salah) | Existing-stack bridge + local logging | §5.4, §10 |
 | F-NOTES-01…10 (notes) | Obsidian vault index + URI + limited writes | §9 |
 | F-GOAL-01…09 (goals/progress) | Goal model + derived progress | §11 |
-| F-DASH-01…10 (dashboard) | Aggregate tables + React Query | §11 |
+| F-DASH-01…10 (dashboard) | Aggregate tables + React Query; F-DASH-02 band + prayer markers shipped; F-DASH-09 day/week/month components open | §11 |
 | F-SET-01…08 (settings/data) | Health page, backup/export, theme | §4.5, §8 |
 | N-PERF-* | WAL, indexes, on-demand rendering, worker threads | §4.1, §6.1 |
 | N-REL-* | WAL, transactions, watermarks, migrations | §4.1, §4.3, §5 |
