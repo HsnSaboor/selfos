@@ -376,7 +376,9 @@ function App() {
       ? ({ ...style, ...LIGHT_TOKENS } as React.CSSProperties)
       : style;
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-  const rangeMax = Math.max(1, ...(range?.days.map((d) => d.screenSeconds) ?? []));
+  // Guard the array: a malformed/older IPC payload must not throw in render.
+  const rangeDays = Array.isArray(range?.days) ? range.days : [];
+  const rangeMax = Math.max(1, ...rangeDays.map((d) => d.screenSeconds));
   const nextPrayer =
     prayers.find((p) => {
       const [h, m] = p.time.split(":").map(Number);
@@ -751,7 +753,7 @@ function App() {
                     <Kpi
                       label="Active days"
                       value={`${range.activeDayCount}`}
-                      sub={`of ${range.days.length} days`}
+                      sub={`of ${rangeDays.length} days`}
                     />
                   </section>
 
@@ -765,9 +767,9 @@ function App() {
                     <div
                       className="hourly"
                       role="img"
-                      aria-label={`Screen time per day over ${range.days.length} days`}
+                      aria-label={`Screen time per day over ${rangeDays.length} days`}
                     >
-                      {range.days.map((d, i) => (
+                      {rangeDays.map((d, i) => (
                         <div
                           key={d.localDate}
                           className="hourly-col"
@@ -779,7 +781,7 @@ function App() {
                               style={{ height: `${(d.screenSeconds / rangeMax) * 100}%` }}
                             />
                           ) : null}
-                          {i === 0 || i === range.days.length - 1 ? (
+                          {i === 0 || i === rangeDays.length - 1 ? (
                             <span className="hourly-tick">{formatShortDate(d.localDate)}</span>
                           ) : null}
                         </div>

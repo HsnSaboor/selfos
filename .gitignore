@@ -5,3 +5,4 @@ spikes/pdfjs/
 out/
 *.sqlite
 *.sqlite-*
+release/

@@ -19,6 +19,13 @@ if (!container) throw new Error("missing #root element");
  * There is no sidebar to point at here, so the fallback is deliberately plain:
  * say what happened, show the message, and offer a reload.
  */
+window.addEventListener("error", (e) => {
+  console.error("[renderer error]", e.message, e.error?.stack ?? "");
+});
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("[renderer rejection]", String(e.reason));
+});
+
 createRoot(container).render(
   <StrictMode>
     <ErrorBoundary

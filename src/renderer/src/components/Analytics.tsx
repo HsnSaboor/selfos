@@ -21,7 +21,8 @@ type Range = (typeof RANGES)[number];
  * 24px with a 4px rounded cap and a 2px surface gap, per the mark spec.
  */
 function DailyChart({ days, onHover }: { days: DayPointView[]; onHover: (d: DayPointView | null) => void }) {
-  const max = Math.max(1, ...days.map((d) => d.screenSeconds));
+  const list = Array.isArray(days) ? days : [];
+  const max = Math.max(1, ...list.map((d) => d.screenSeconds));
   const peak = days.reduce<DayPointView | null>(
     (a, d) => (a === null || d.screenSeconds > a.screenSeconds ? d : a),
     null,
@@ -52,7 +53,7 @@ function DailyChart({ days, onHover }: { days: DayPointView[]; onHover: (d: DayP
           role="img"
           aria-label={`Screen time per day, peak ${formatDuration(max)}`}
         >
-          {days.map((d) => {
+          {list.map((d) => {
             const h = (d.screenSeconds / max) * 100;
             const isPeak = peak !== null && d.localDate === peak.localDate && peak.screenSeconds > 0;
             return (
@@ -128,7 +129,10 @@ function DomainBars({ domains }: { domains: DomainUsageView[] }) {
 
 /** The table view: identity and values never depend on the chart alone. */
 function DataTable({ days }: { days: DayPointView[] }) {
-  const rows = useMemo(() => [...days].reverse().filter((d) => d.screenSeconds > 0), [days]);
+  const rows = useMemo(
+    () => [...(Array.isArray(days) ? days : [])].reverse().filter((d) => d.screenSeconds > 0),
+    [days],
+  );
   return (
     <details className="chart-table">
       <summary>Data table ({rows.length} active days)</summary>
