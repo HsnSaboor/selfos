@@ -1,0 +1,36 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Gates
+        run: |
+          bunx tsc --noEmit
+          bunx biome check src tests
+          bunx vitest run
+      - name: Build
+        run: bunx electron-vite build
+      - name: Package
+        run: bunx electron-builder --linux AppImage deb --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selfos-linux
+          path: |
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
