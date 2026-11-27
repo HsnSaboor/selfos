@@ -25,8 +25,8 @@ import { defineConfig } from "vitest/config";
  * `bunx vitest run` stays available as `just test-plain`).
  */
 export default defineConfig({
-  testTimeout: 120_000,
   test: {
+    testTimeout: 120_000,
     pool: "forks",
     maxWorkers: 1,
     minWorkers: 1,
