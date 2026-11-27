@@ -45,7 +45,7 @@ const MODULE_LABELS = {
   salah: "Salah",
   notes: "Notes",
   goals: "Goals",
-  data: "Data",
+  data: "Data & Settings",
 } as const satisfies Record<ModuleId, string>;
 
 type ModuleName = (typeof MODULE_LABELS)[ModuleId];
@@ -437,7 +437,7 @@ function App() {
           {active === "Goals" ? <GoalsView localDate={today} /> : null}
           {active === "Analytics" || active === "Time" ? <AnalyticsView /> : null}
           {active === "Sites" ? <SitesView localDate={today} /> : null}
-          {active === "Data" ? <DataPage /> : null}
+          {active === "Data & Settings" ? <DataPage /> : null}
           {active !== "Dashboard" ? null : (
             <>
               <section className="kpis">
