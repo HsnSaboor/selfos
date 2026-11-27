@@ -2593,3 +2593,26 @@ all findings applied.
 
 **Round 20 reviewer status:** all three reported. Not clean at review time; all
 findings applied. The loop is complete at 20 rounds.
+
+---
+
+# Close-out — every open item and SHOULDs (post-round 20)
+
+| Item | Outcome |
+|---|---|
+| F-HABIT-11 reminders | FIXED — 30 s scheduler, `habit.remind_at`, notification_log once/day, suppressed when complete |
+| F-HABIT-13 linked habits | FIXED — `habit.link`, refresh from reading/focus/salah on rebuild |
+| F-SALAH-07 week/month heatmap | FIXED — `salah.completion`, 7/30/90 grid |
+| F-TIME-11 crash restart | FIXED — fatal handler relaunches; systemd unit shipped |
+| F-TIME-12 corrections | FIXED — mark untracked, merge focus events, Data UI |
+| F-TIME-15 retention | FIXED — `downsample()` into `focus_hourly`, daily aggregates kept |
+| F-DASH-09 week/month | FIXED — dashboard period selector + totals + chart |
+| F-READ-11 in-book search | FIXED — page-numbered, 500-page cap, jump to hit |
+| F-GOAL-04 quota from events | FIXED — auto-source progress (goal_progress) |
+| F-SET-05 import | FIXED — `data.importJson` |
+| F-TIME-10 switches/hour | FIXED — `switches_per_hour` + longest stretch |
+| Notes write audit | FIXED — `note_audit` on append/create |
+| F-READ import collision | FIXED — both books shared `[object Object].pdf`; now hashed by content digest |
+
+Gates after close-out: tsc clean, biome clean (86 files), **463 tests**, all
+verifiers green (M1 skipped without Hyprland).

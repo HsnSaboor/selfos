@@ -11,7 +11,6 @@ import { migrate } from "../src/main/db/migrate";
 import { heatmapDays } from "../src/main/modules/habits/streak";
 import { NotesIndex, resolveInVault, safeFolder } from "../src/main/modules/notes/index";
 import { BookStore } from "../src/main/modules/reading/library";
-import { freshDb } from "./helpers/db";
 import { tempDir } from "./helpers/temp";
 
 function freshDb(): Db {

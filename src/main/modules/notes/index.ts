@@ -371,6 +371,7 @@ export class NotesIndex {
     const tmp = `${abs}.selfos-tmp`;
     writeFileSync(tmp, next);
     renameSync(tmp, abs);
+    this.#audit("append", relPath, Buffer.byteLength(next));
     this.upsertFile(abs, relPath);
     return { path: relPath, created };
   }
@@ -385,8 +386,26 @@ export class NotesIndex {
     const tmp = `${abs}.selfos-tmp`;
     writeFileSync(tmp, content);
     renameSync(tmp, abs);
+    this.#audit("create", relPath, Buffer.byteLength(content));
     this.upsertFile(abs, relPath);
     return { path: relPath, created: true };
+  }
+
+  /** C-9: every vault write is recorded, so the user can audit changes. */
+  #audit(action: "append" | "create", path: string, bytes: number): void {
+    try {
+      this.#db.run(
+        "INSERT INTO note_audit (at, action, path, bytes) VALUES (?, ?, ?, ?)",
+        Date.now(),
+        action,
+        path,
+        bytes,
+      );
+    } catch (err) {
+      // A legacy index file opened before migration 0004 has no audit table;
+      // the write itself must still succeed.
+      console.error("[notes] audit failed:", err instanceof Error ? err.message : err);
+    }
   }
 
   /** Obsidian URI for a note, optionally at a heading. */

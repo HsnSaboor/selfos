@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type Api,
   PRAYER_COUNT,
@@ -6,10 +6,16 @@ import {
   type PrayerStatus,
   type SalahDayView,
 } from "../../../shared/api";
-
-type SalahHistoryDay = Api["salah.history"]["result"][number];
-
 import { formatClock } from "../../../shared/format";
+import { isoWeekday } from "../../../shared/schedule";
+
+type SalahCompletionDay = Api["salah.completion"]["result"][number];
+
+/** Colour bucket for a completion cell, by logged/total (F-SALAH-07). */
+function completionClass(logged: number, total: number): "full" | "partial" | "empty" {
+  if (total > 0 && logged >= total) return "full";
+  return logged > 0 ? "partial" : "empty";
+}
 
 const STATUS_LABEL: Record<PrayerStatus, string> = {
   on_time: "On time",
@@ -30,7 +36,9 @@ export function SalahView({ localDate }: { localDate: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<PrayerId | null>(null);
 
-  const [history, setHistory] = useState<SalahHistoryDay[]>([]);
+  const [completion, setCompletion] = useState<SalahCompletionDay[]>([]);
+  // F-SALAH-07: 7/30/90-day window for the completion heatmap.
+  const [range, setRange] = useState<7 | 30 | 90>(30);
 
   /** Sequence guard: see `Habits.tsx` — the same `localDate` rollover and the
    *  same 60 s interval can deliver yesterday's day under today's date. */
@@ -38,10 +46,10 @@ export function SalahView({ localDate }: { localDate: string }) {
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
-    const [res, hist] = await Promise.all([
+    const [res, comp] = await Promise.all([
       window.selfos.invoke("salah.day", { localDate }),
-      // F-SALAH-07: the daily completion heatmap. 12 weeks of per-day counts.
-      window.selfos.invoke("salah.history", { days: 84 }),
+      // F-SALAH-07: daily completion counts for the heatmap, over the picked range.
+      window.selfos.invoke("salah.completion", { days: range }),
     ]);
     if (seq !== loadSeq.current) return;
     if (res.ok) {
@@ -50,11 +58,11 @@ export function SalahView({ localDate }: { localDate: string }) {
     } else {
       setError(res.error);
     }
-    if (hist.ok) setHistory(hist.data);
+    if (comp.ok) setCompletion(comp.data);
     // An empty completion panel with no message reads as "no data" rather than
     // "the query failed" — the same rule the other secondary fetches follow.
-    else setError((prev) => prev ?? `history: ${hist.error}`);
-  }, [localDate]);
+    else setError((prev) => prev ?? `completion: ${comp.error}`);
+  }, [localDate, range]);
 
   useEffect(() => {
     void load();
@@ -89,6 +97,27 @@ export function SalahView({ localDate }: { localDate: string }) {
     else setError(res.error);
     setBusy(null);
   };
+
+  // F-SALAH-07: chunk the completion window into week columns (rows = weekdays).
+  // The window ends today, so the first column is padded to the weekday of its
+  // first cell — otherwise every weekday row is shifted (the Habits heatmap fix).
+  // Keys are built here (not in JSX) so no render callback needs the array index.
+  const weeks = useMemo(() => {
+    type Slot = { key: string; cell: SalahCompletionDay | null };
+    const cols: Array<{ key: string; cells: Slot[] }> = [];
+    const first = completion[0];
+    if (!first) return cols;
+    const cells: Slot[] = Array.from({ length: isoWeekday(first.localDate) - 1 }, (_, i) => ({
+      key: `pad-${first.localDate}-${i}`,
+      cell: null,
+    }));
+    for (const cell of completion) cells.push({ key: cell.localDate, cell });
+    for (let i = 0; i < cells.length; i += 7) {
+      const slice = cells.slice(i, i + 7);
+      cols.push({ key: slice.find((s) => s.cell)?.key ?? `week-${i}`, cells: slice });
+    }
+    return cols;
+  }, [completion]);
 
   // A failed write must not replace the module: the prayer list, qada grid and
   // heatmap stay usable, and the error is shown inline (as every other view does).
@@ -241,49 +270,55 @@ export function SalahView({ localDate }: { localDate: string }) {
         })}
       </div>
 
-      {/* F-SALAH-07: daily prayer completion heatmap (12 weeks). */}
-      <div className="panel salah-heat-panel">
+      {/* F-SALAH-07: daily prayer completion heatmap, with a 7/30/90-day range. */}
+      <div className="panel salah-complete-panel">
         <div className="panel-head">
           <h2>Completion</h2>
-          <span className="muted">last 12 weeks</span>
+          <div className="range-picker">
+            {([7, 30, 90] as const).map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={`range-btn${range === r ? " on" : ""}`}
+                aria-pressed={range === r}
+                onClick={() => setRange(r)}
+              >
+                {r}d
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="salah-heat" role="img" aria-label="Daily prayer completion over the last 12 weeks">
-          {history.map((d) => {
-            // `logged` counts every row, including "missed" and "excused", so it
-            // cannot be used as "prayed". A day where all five were logged as
-            // missed used to render in the strongest "full" colour.
-            //
-            // `excused` is a subset of `logged`, so adding it back here counted
-            // those prayers twice: with 3 on-time, 1 excused and 1 unlogged,
-            // `prayed` was 3 and `accounted` came to 4 — rendering "full" on a
-            // day that was one prayer short. `prayed` alone is the count of
-            // non-missed, non-excused prayers only if excused is removed, so
-            // subtract it: `logged - missed - excused`.
-            const excused = d.excused;
-            const prayed = Math.max(0, d.logged - d.missed - excused);
-            const accounted = prayed + excused;
-            const cls =
-              accounted >= PRAYER_COUNT && d.missed === 0
-                ? "full"
-                : d.missed >= PRAYER_COUNT
-                  ? "missed"
-                  : accounted > 0 || d.missed > 0
-                    ? "partial"
-                    : "empty";
-            const label =
-              d.logged === 0 && d.missed === 0
-                ? "nothing logged"
-                : `${prayed}/${PRAYER_COUNT} prayed${d.excused ? `, ${d.excused} excused` : ""}${
-                    d.missed ? `, ${d.missed} missed` : ""
-                  }`;
-            return (
-              <span
-                key={d.localDate}
-                className={`salah-heat-cell ${cls}`}
-                title={`${d.localDate}: ${label}`}
-              />
-            );
-          })}
+        <div
+          className="salah-complete-grid"
+          role="img"
+          aria-label={`Daily prayer completion over the last ${range} days`}
+        >
+          {weeks.map((week) => (
+            <div key={week.key} className="salah-complete-week">
+              {week.cells.map((slot) =>
+                slot.cell ? (
+                  <span
+                    key={slot.key}
+                    className={`salah-complete-cell ${completionClass(slot.cell.logged, slot.cell.total)}`}
+                    title={`${slot.cell.localDate}: ${slot.cell.logged}/${slot.cell.total} prayers`}
+                  />
+                ) : (
+                  <span key={slot.key} className="salah-complete-cell pad" />
+                ),
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="legend">
+          <span className="legend-item">
+            <span className="salah-complete-cell empty" /> none
+          </span>
+          <span className="legend-item">
+            <span className="salah-complete-cell partial" /> partial
+          </span>
+          <span className="legend-item">
+            <span className="salah-complete-cell full" /> all {PRAYER_COUNT}
+          </span>
         </div>
       </div>
 

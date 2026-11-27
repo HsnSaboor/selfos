@@ -199,7 +199,7 @@ app.whenReady().then(async () => {
 
   // ── data page in the UI ───────────────────────────────────────────────
   await win.webContents.executeJavaScript(`
-    [...document.querySelectorAll(".nav-item")].find(b => b.textContent === "Data")?.click()
+    [...document.querySelectorAll(".nav-item")].find(b => b.textContent.startsWith("Data"))?.click()
   `);
   await sleep(900);
   const dataDom = await win.webContents.executeJavaScript(`({
@@ -209,7 +209,7 @@ app.whenReady().then(async () => {
     backupButton: [...document.querySelectorAll("button")].some(b => b.textContent === "Back up now"),
     error: document.querySelector(".error")?.textContent ?? null,
   })`);
-  step("ui-data-page", dataDom.header === "Data", dataDom.header);
+  step("ui-data-page", dataDom.header.startsWith("Data"), dataDom.header);
   step("ui-data-subtitle", dataDom.sub.includes("backups"), dataDom.sub);
   step("ui-data-tables", dataDom.rows > 5, `${dataDom.rows} rows`);
   step("ui-data-backup-button", dataDom.backupButton);

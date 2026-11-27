@@ -12,7 +12,6 @@ import {
   validateGoalInput,
 } from "../src/main/modules/goals/model";
 import { GoalsService } from "../src/main/modules/goals/service";
-import { freshDb } from "./helpers/db";
 import { tempDir } from "./helpers/temp";
 
 function freshDb(): Db {

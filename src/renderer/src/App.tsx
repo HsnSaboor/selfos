@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type AnalyticsView as AnalyticsData,
   type AppUsage,
   type BookView,
   type DaySummary,
@@ -13,7 +14,13 @@ import {
   type TimelineSegment,
 } from "../../shared/api";
 import { todayKey } from "../../shared/dates";
-import { formatBytes, formatClock, formatDateTime, formatDuration } from "../../shared/format";
+import {
+  formatBytes,
+  formatClock,
+  formatDateTime,
+  formatDuration,
+  formatShortDate,
+} from "../../shared/format";
 import { AnalyticsView } from "./components/Analytics";
 import { type Command, CommandPalette } from "./components/CommandPalette";
 import { DataPage } from "./components/Data";
@@ -51,6 +58,11 @@ const MODULE_LABELS = {
 type ModuleName = (typeof MODULE_LABELS)[ModuleId];
 const MODULES: readonly ModuleName[] = MODULE_IDS.map((id) => MODULE_LABELS[id]);
 
+/** F-DASH-09: the dashboard window, and its selector labels. */
+type Period = "day" | "week" | "month";
+const PERIODS: readonly Period[] = ["day", "week", "month"];
+const PERIOD_LABELS: Record<Period, string> = { day: "Day", week: "Week", month: "Month" };
+
 declare global {
   interface Window {
     selfos: import("../../shared/api").SelfOSBridge;
@@ -81,6 +93,10 @@ function App() {
   const [apps, setApps] = useState<AppUsage[]>([]);
   const [habits, setHabits] = useState<HabitView[]>([]);
   const [books, setBooks] = useState<BookView[]>([]);
+  /** F-DASH-09: day/week/month window; only the day view polls every 5 s. */
+  const [period, setPeriod] = useState<Period>("day");
+  const [range, setRange] = useState<AnalyticsData | null>(null);
+  const rangeSeq = useRef(0);
   /** F-SET-08 manual override, persisted locally (auto follows Omarchy). */
   const [themeOverride, setThemeOverride] = useState<"auto" | "light" | "dark">(() => {
     const saved = localStorage.getItem("selfos.theme.override");
@@ -145,6 +161,32 @@ function App() {
     setErrorFor("dashboard", failures.length ? failures.join("; ") : null);
   }, [setErrorFor]);
 
+  /**
+   * F-DASH-09: week/month totals for the dashboard.
+   *
+   * A sequence guard drops a stale response: switching week→month quickly used
+   * to let the slower 7-day read land last and overwrite the 30-day figures.
+   * The 5 s poll stays on the day view only, so this is fetched on demand.
+   */
+  const loadRange = useCallback(async () => {
+    const seq = ++rangeSeq.current;
+    const days = period === "week" ? 7 : 30;
+    const res = await window.selfos.invoke("analytics.range", { days });
+    if (seq !== rangeSeq.current) return;
+    if (res.ok) {
+      setRange(res.data);
+      setErrorFor("dashboard-range", null);
+    } else {
+      setRange(null);
+      setErrorFor("dashboard-range", res.error);
+    }
+  }, [period, setErrorFor]);
+
+  useEffect(() => {
+    if (active !== "Dashboard" || period === "day") return;
+    void loadRange();
+  }, [active, period, loadRange]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -197,14 +239,14 @@ function App() {
    * window visibility.
    */
   useEffect(() => {
-    if (active !== "Dashboard") return;
+    if (active !== "Dashboard" || period !== "day") return;
     const tick = () => {
       if (document.hidden) return;
       void refreshDashboard();
     };
     const refresh = setInterval(tick, 5000);
     return () => clearInterval(refresh);
-  }, [active, refreshDashboard]);
+  }, [active, period, refreshDashboard]);
 
   // Ctrl+K opens the palette from anywhere, including while a note or reader is
   // focused; the palette's own handler owns every key while it is open.
@@ -334,6 +376,7 @@ function App() {
       ? ({ ...style, ...LIGHT_TOKENS } as React.CSSProperties)
       : style;
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const rangeMax = Math.max(1, ...(range?.days.map((d) => d.screenSeconds) ?? []));
   const nextPrayer =
     prayers.find((p) => {
       const [h, m] = p.time.split(":").map(Number);
@@ -440,8 +483,31 @@ function App() {
           {active === "Data & Settings" ? <DataPage /> : null}
           {active !== "Dashboard" ? null : (
             <>
-              <section className="kpis">
-                {/* F-DASH-03: focused time, screen time, watch time, reading
+              <div className="habits-head">
+                <div>
+                  <div className="page-sub">
+                    {period === "day" ? "Today" : period === "week" ? "Last 7 days" : "Last 30 days"}
+                  </div>
+                </div>
+                <fieldset className="range-picker" aria-label="Dashboard period">
+                  {PERIODS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`range-btn${p === period ? " on" : ""}`}
+                      onClick={() => setPeriod(p)}
+                      aria-pressed={p === period}
+                    >
+                      {PERIOD_LABELS[p]}
+                    </button>
+                  ))}
+                </fieldset>
+              </div>
+
+              {period === "day" ? (
+                <>
+                  <section className="kpis">
+                    {/* F-DASH-03: focused time, screen time, watch time, reading
                   time, habits, prayers and best streak, each clickable to its
                   module. "Focused" is screen time minus sub-15s switch noise,
                   NOT screen time minus media — media segments are long enough to
@@ -449,223 +515,281 @@ function App() {
                   the header of modules/time/aggregate.ts). The row previously
                   showed only screen time, with no streak and no tile that did
                   anything. */}
-                <Kpi
-                  label="Focused"
-                  value={formatDuration(day?.focusedSeconds ?? 0)}
-                  sub="active work"
-                  onClick={() => setActive("Analytics")}
-                />
-                <Kpi
-                  label="Screen time"
-                  value={formatDuration(day?.screenSeconds ?? 0)}
-                  sub="all time at the screen"
-                  onClick={() => setActive("Analytics")}
-                />
-                <Kpi
-                  label="Watch time"
-                  value={formatDuration(day?.watchSeconds ?? 0)}
-                  sub="local + browser"
-                  onClick={() => setActive("Analytics")}
-                />
-                <Kpi
-                  label="Reading"
-                  value={formatDuration(day?.readingSeconds ?? 0)}
-                  onClick={() => setActive("Reading")}
-                />
-                <Kpi
-                  label="Habits"
-                  value={`${day?.habitsDone ?? 0}/${day?.habitsTotal ?? 0}`}
-                  onClick={() => setActive("Habits")}
-                />
-                <Kpi
-                  label="Prayers"
-                  value={`${day?.prayersLogged ?? 0}/${PRAYER_COUNT}`}
-                  onClick={() => setActive("Salah")}
-                />
-                <Kpi
-                  label="Best streak"
-                  value={`${day?.bestStreak ?? 0}d`}
-                  sub="habits"
-                  onClick={() => setActive("Habits")}
-                />
-              </section>
+                    <Kpi
+                      label="Focused"
+                      value={formatDuration(day?.focusedSeconds ?? 0)}
+                      sub="active work"
+                      onClick={() => setActive("Analytics")}
+                    />
+                    <Kpi
+                      label="Screen time"
+                      value={formatDuration(day?.screenSeconds ?? 0)}
+                      sub="all time at the screen"
+                      onClick={() => setActive("Analytics")}
+                    />
+                    <Kpi
+                      label="Watch time"
+                      value={formatDuration(day?.watchSeconds ?? 0)}
+                      sub="local + browser"
+                      onClick={() => setActive("Analytics")}
+                    />
+                    <Kpi
+                      label="Reading"
+                      value={formatDuration(day?.readingSeconds ?? 0)}
+                      onClick={() => setActive("Reading")}
+                    />
+                    <Kpi
+                      label="Habits"
+                      value={`${day?.habitsDone ?? 0}/${day?.habitsTotal ?? 0}`}
+                      onClick={() => setActive("Habits")}
+                    />
+                    <Kpi
+                      label="Prayers"
+                      value={`${day?.prayersLogged ?? 0}/${PRAYER_COUNT}`}
+                      onClick={() => setActive("Salah")}
+                    />
+                    <Kpi
+                      label="Best streak"
+                      value={`${day?.bestStreak ?? 0}d`}
+                      sub="habits"
+                      onClick={() => setActive("Habits")}
+                    />
+                  </section>
 
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>Today</h2>
-                  <span className="muted">
-                    {day ? `${formatClock(day.firstActivity)} – ${formatClock(day.lastActivity)}` : ""}
-                  </span>
-                </div>
-                <Timeline segments={segments} dayStart={dayStart} prayers={prayers} />
-                {/* F-DASH-04: next prayer + today's checklist with one-tap logging. */}
-                <section className="panel">
-                  <h2>Prayers</h2>
-                  {nextPrayer ? (
-                    <p className="muted panel-note">
-                      Next: {nextPrayer.prayer} at {nextPrayer.time}
-                    </p>
-                  ) : null}
-                  <div className="prayer-row">
-                    {prayers.map((p) => (
-                      <button
-                        key={p.prayer}
-                        type="button"
-                        className={`mini${p.status ? " done" : ""}`}
-                        disabled={busyPrayer === p.prayer}
-                        onClick={async () => {
-                          setBusyPrayer(p.prayer);
-                          const res = await window.selfos.invoke("salah.log", { prayer: p.prayer });
-                          setBusyPrayer(null);
-                          if (!res.ok) setErrorFor("dashboard-prayer", res.error);
-                          else await refreshDashboard();
-                        }}
-                      >
-                        {p.prayer}
-                        {p.status ? ` · ${p.status}` : ""}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                {/* F-DASH-05: today's habits, one tap each. */}
-                <section className="panel">
-                  <h2>Habits</h2>
-                  {habits.filter((h) => h.archivedAt === null).length === 0 ? (
-                    <div className="empty">No habits yet.</div>
-                  ) : (
-                    <div className="habit-row">
-                      {habits
-                        .filter((h) => h.archivedAt === null)
-                        .map((h) => (
+                  <section className="panel">
+                    <div className="panel-head">
+                      <h2>Today</h2>
+                      <span className="muted">
+                        {day ? `${formatClock(day.firstActivity)} – ${formatClock(day.lastActivity)}` : ""}
+                      </span>
+                    </div>
+                    <Timeline segments={segments} dayStart={dayStart} prayers={prayers} />
+                    {/* F-DASH-04: next prayer + today's checklist with one-tap logging. */}
+                    <section className="panel">
+                      <h2>Prayers</h2>
+                      {nextPrayer ? (
+                        <p className="muted panel-note">
+                          Next: {nextPrayer.prayer} at {nextPrayer.time}
+                        </p>
+                      ) : null}
+                      <div className="prayer-row">
+                        {prayers.map((p) => (
                           <button
-                            key={h.id}
+                            key={p.prayer}
                             type="button"
-                            className={`mini${h.todayEntry?.status === "done" || h.todayEntry?.status === "clean" ? " done" : ""}`}
+                            className={`mini${p.status ? " done" : ""}`}
+                            disabled={busyPrayer === p.prayer}
                             onClick={async () => {
-                              const res = await window.selfos.invoke("habits.toggle", { habitId: h.id });
-                              if (!res.ok) setErrorFor("dashboard-habit", res.error);
+                              setBusyPrayer(p.prayer);
+                              const res = await window.selfos.invoke("salah.log", { prayer: p.prayer });
+                              setBusyPrayer(null);
+                              if (!res.ok) setErrorFor("dashboard-prayer", res.error);
                               else await refreshDashboard();
                             }}
                           >
-                            {h.name}
+                            {p.prayer}
+                            {p.status ? ` · ${p.status}` : ""}
                           </button>
                         ))}
+                      </div>
+                    </section>
+
+                    {/* F-DASH-05: today's habits, one tap each. */}
+                    <section className="panel">
+                      <h2>Habits</h2>
+                      {habits.filter((h) => h.archivedAt === null).length === 0 ? (
+                        <div className="empty">No habits yet.</div>
+                      ) : (
+                        <div className="habit-row">
+                          {habits
+                            .filter((h) => h.archivedAt === null)
+                            .map((h) => (
+                              <button
+                                key={h.id}
+                                type="button"
+                                className={`mini${h.todayEntry?.status === "done" || h.todayEntry?.status === "clean" ? " done" : ""}`}
+                                onClick={async () => {
+                                  const res = await window.selfos.invoke("habits.toggle", { habitId: h.id });
+                                  if (!res.ok) setErrorFor("dashboard-habit", res.error);
+                                  else await refreshDashboard();
+                                }}
+                              >
+                                {h.name}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </section>
+
+                    {/* F-DASH-06: currently reading, with progress and resume. */}
+                    {currentlyReading ? (
+                      <section className="panel">
+                        <h2>Currently reading</h2>
+                        <p className="muted panel-note">
+                          {currentlyReading.title} · {Math.round(currentlyReading.percent * 100)}%
+                        </p>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            setActive("Reading");
+                          }}
+                        >
+                          Resume
+                        </button>
+                      </section>
+                    ) : null}
+
+                    <div className="legend">
+                      {apps.slice(0, 5).map((a) => (
+                        <span key={a.appClass} className="legend-item">
+                          <span className="app-dot" style={{ background: colorFor(a.appClass) }} />
+                          {a.appClass}
+                        </span>
+                      ))}
                     </div>
-                  )}
-                </section>
-
-                {/* F-DASH-06: currently reading, with progress and resume. */}
-                {currentlyReading ? (
-                  <section className="panel">
-                    <h2>Currently reading</h2>
-                    <p className="muted panel-note">
-                      {currentlyReading.title} · {Math.round(currentlyReading.percent * 100)}%
-                    </p>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        setActive("Reading");
-                      }}
-                    >
-                      Resume
-                    </button>
                   </section>
-                ) : null}
 
-                <div className="legend">
-                  {apps.slice(0, 5).map((a) => (
-                    <span key={a.appClass} className="legend-item">
-                      <span className="app-dot" style={{ background: colorFor(a.appClass) }} />
-                      {a.appClass}
-                    </span>
-                  ))}
-                </div>
-              </section>
+                  <section className="panel">
+                    <h2>Top apps</h2>
+                    <TopApps apps={apps} />
+                  </section>
 
-              <section className="panel">
-                <h2>Top apps</h2>
-                <TopApps apps={apps} />
-              </section>
-
-              <section className="panel">
-                <h2>System health</h2>
-                {health ? (
-                  <table>
-                    <tbody>
-                      <tr>
-                        <td>Database</td>
-                        <td>{health.dbPath}</td>
-                      </tr>
-                      <tr>
-                        <td>Size</td>
-                        <td>{formatBytes(health.dbSizeBytes)}</td>
-                      </tr>
-                      <tr>
-                        <td>Integrity</td>
-                        <td>{health.integrity}</td>
-                      </tr>
-                      <tr>
-                        <td>Tracking</td>
-                        <td>
-                          {health.collector.paused
-                            ? `paused (${health.collector.pauseReason ?? "manual"})`
-                            : "active"}
-                          {" · "}
-                          {health.collector.connected ? "socket connected" : "socket disconnected"}
-                          {" · "}
-                          {health.collector.segmentsWritten} segments
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>Events</td>
-                        <td>
-                          {Object.entries(health.collector.eventCounts)
-                            .map(([k, v]) => `${k}:${v}`)
-                            .join("  ") || "none yet"}
-                        </td>
-                      </tr>
-                      <tr>
-                        {/* F-SET-07 requires the health page to show "last
+                  <section className="panel">
+                    <h2>System health</h2>
+                    {health ? (
+                      <table>
+                        <tbody>
+                          <tr>
+                            <td>Database</td>
+                            <td>{health.dbPath}</td>
+                          </tr>
+                          <tr>
+                            <td>Size</td>
+                            <td>{formatBytes(health.dbSizeBytes)}</td>
+                          </tr>
+                          <tr>
+                            <td>Integrity</td>
+                            <td>{health.integrity}</td>
+                          </tr>
+                          <tr>
+                            <td>Tracking</td>
+                            <td>
+                              {health.collector.paused
+                                ? `paused (${health.collector.pauseReason ?? "manual"})`
+                                : "active"}
+                              {" · "}
+                              {health.collector.connected ? "socket connected" : "socket disconnected"}
+                              {" · "}
+                              {health.collector.segmentsWritten} segments
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>Events</td>
+                            <td>
+                              {Object.entries(health.collector.eventCounts)
+                                .map(([k, v]) => `${k}:${v}`)
+                                .join("  ") || "none yet"}
+                            </td>
+                          </tr>
+                          <tr>
+                            {/* F-SET-07 requires the health page to show "last
                             ingest time". The value was already computed per
                             browser profile and carried in the contract, but
                             nothing rendered it, so the MUST read as unmet while
                             the data sat unused one field away. */}
-                        <td>Last ingest</td>
-                        <td>
-                          {(() => {
-                            const times = health.browserProfiles
-                              .map((p) => p.lastIngestAt)
-                              .filter((t): t is number => typeof t === "number");
-                            // `formatDateTime`, not `formatClock`: a clock-only
-                            // time renders an ingest from days ago as if it were
-                            // today. This matches how the Data screen renders
-                            // `lastBackupAt` (`Data.tsx`) — it is not a sibling
-                            // row of this table, which has no backup row.
-                            return times.length ? formatDateTime(Math.max(...times)) : "never";
-                          })()}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>earlyoom prefers Electron</td>
-                        <td>{health.earlyoomPreference ? "yes — memory is watched" : "no"}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="muted">loading…</div>
-                )}
+                            <td>Last ingest</td>
+                            <td>
+                              {(() => {
+                                const times = health.browserProfiles
+                                  .map((p) => p.lastIngestAt)
+                                  .filter((t): t is number => typeof t === "number");
+                                // `formatDateTime`, not `formatClock`: a clock-only
+                                // time renders an ingest from days ago as if it were
+                                // today. This matches how the Data screen renders
+                                // `lastBackupAt` (`Data.tsx`) — it is not a sibling
+                                // row of this table, which has no backup row.
+                                return times.length ? formatDateTime(Math.max(...times)) : "never";
+                              })()}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>earlyoom prefers Electron</td>
+                            <td>{health.earlyoomPreference ? "yes — memory is watched" : "no"}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="muted">loading…</div>
+                    )}
 
-                <h3>Browser profiles</h3>
-                {health?.browserProfiles.map((p) => (
-                  <div key={p.profileDir} className="profile-row">
-                    <strong>{p.profileDir}</strong>
-                    <span className={`pill ${p.strategy}`}>{p.strategy}</span>
-                    <span className="muted">{p.exists ? "history found" : "history missing"}</span>
-                  </div>
-                ))}
-              </section>
+                    <h3>Browser profiles</h3>
+                    {health?.browserProfiles.map((p) => (
+                      <div key={p.profileDir} className="profile-row">
+                        <strong>{p.profileDir}</strong>
+                        <span className={`pill ${p.strategy}`}>{p.strategy}</span>
+                        <span className="muted">{p.exists ? "history found" : "history missing"}</span>
+                      </div>
+                    ))}
+                  </section>
+                </>
+              ) : range ? (
+                <>
+                  <section className="kpis">
+                    <Kpi
+                      label="Screen"
+                      value={formatDuration(range.totals.screenSeconds)}
+                      sub={`over ${period === "week" ? 7 : 30} days`}
+                    />
+                    <Kpi
+                      label="Focused"
+                      value={formatDuration(range.totals.focusedSeconds)}
+                      sub="active work"
+                    />
+                    <Kpi label="Watch" value={formatDuration(range.totals.mediaSeconds)} sub="local media" />
+                    <Kpi label="Reading" value={formatDuration(range.totals.readingSeconds)} />
+                    <Kpi
+                      label="Active days"
+                      value={`${range.activeDayCount}`}
+                      sub={`of ${range.days.length} days`}
+                    />
+                  </section>
+
+                  <section className="panel">
+                    <div className="panel-head">
+                      <h2>Screen time per day</h2>
+                      <span className="muted">
+                        {range.from} → {range.to}
+                      </span>
+                    </div>
+                    <div
+                      className="hourly"
+                      role="img"
+                      aria-label={`Screen time per day over ${range.days.length} days`}
+                    >
+                      {range.days.map((d, i) => (
+                        <div
+                          key={d.localDate}
+                          className="hourly-col"
+                          title={`${d.localDate} — ${formatDuration(d.screenSeconds)} screen · ${formatDuration(d.focusedSeconds)} focused`}
+                        >
+                          {d.screenSeconds > 0 ? (
+                            <span
+                              className="hourly-fill"
+                              style={{ height: `${(d.screenSeconds / rangeMax) * 100}%` }}
+                            />
+                          ) : null}
+                          {i === 0 || i === range.days.length - 1 ? (
+                            <span className="hourly-tick">{formatShortDate(d.localDate)}</span>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <div className="muted">Loading range…</div>
+              )}
             </>
           )}
         </ErrorBoundary>

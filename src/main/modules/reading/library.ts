@@ -5,16 +5,7 @@
  * the same file is a no-op and the original path is only a record.
  */
 import { createHash } from "node:crypto";
-import {
-  closeSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  statSync,
-} from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import {
   type BookSettingsView,
@@ -183,7 +174,7 @@ export class BookStore {
     const existing = this.#db.get<{ id: number }>("SELECT id FROM book WHERE sha256 = ?", digest);
     if (existing) return { id: existing.id, created: false };
 
-    const dest = join(this.#libraryDir, `${sha256}.pdf`);
+    const dest = join(this.#libraryDir, `${digest}.pdf`);
     if (!existsSync(dest)) copyFileSync(sourcePath, dest);
 
     const result = this.#db.run(

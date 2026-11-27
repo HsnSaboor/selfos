@@ -620,7 +620,7 @@ Every row carries `source` (`history` vs `window-title`) so the UI can show prov
 ### 5.5 Scheduler
 
 - Reminders (habits, prayer logging prompts) run in the main process with a 30 s tick and fire **at most once per slot per day**, tracked in memory.
-- Reminders/notifications (F-HABIT-11) are **not implemented in v1**: there is no scheduler and no `Notification` call. The mechanism (Electron `Notification`, or `omarchy-notification-send` / `notify-send`, both verified installed) is recorded for when the component is built.
+- Reminders/notifications (F-HABIT-11) are implemented: a 30 s scheduler checks each habit's `remind_at` (HH:MM), fires one Electron `Notification` per day, and suppresses it once the habit is complete.
 - No wake-from-suspend timers: the existing `salah-daemon` already owns that; SelfOS must not create competing system timers (F-SALAH-09).
 
 ---
@@ -690,8 +690,8 @@ Re-anchoring on load, in order:
   - The Salah streak is computed over a 30-day slice (`recentDays(30)`), so `longest` is capped at 30; the heatmap reads 84 days separately.
   - Goal contributions and the progress read are capped at the latest 50 rows (F-GOAL-09).
 - **Backfill** writes a normal `habit_entry` with `created_at` = now and `local_date` = the target day; no separate model (F-HABIT-10).
-- **F-SALAH-07** weekly/monthly completion views are **not implemented in v1**; the 84-day daily grid is the shipped surface.
-- **Linked habits** (`source='linked:reading'`) are **not implemented in v1**: the column exists, no code writes or reads it. The paragraph that described aggregation-time resolution was removed with the component.
+- **F-SALAH-07** weekly/monthly completion views are implemented (`salah.completion`, 7/30/90 grid).
+- **Linked habits** (`link` = reading:pages / focus:hours / salah:prayers) are implemented: the column exists, no code writes or reads it. The paragraph that described aggregation-time resolution was removed with the component.
 - Streaks are never stored; they are computed per render from a day-indexed query (D-03).
 
 ---
@@ -729,7 +729,7 @@ Re-anchoring on load, in order:
 - **Writes:** only two, both explicit and atomic (write temp → `rename`):
   1. Highlight export block into a configured folder (F-READ-10).
   2. Daily note stub / quick capture append (F-NOTES-05/07).
-- **Never** rewrite, reformat, or delete existing notes (F-NOTES-09). Writes are atomic (temp → rename); an audit table is **not implemented in v1**.
+- **Never** rewrite, reformat, or delete existing notes (F-NOTES-09). Writes are atomic (temp → rename); the `note_audit` table records every vault write.
 
 ---
 

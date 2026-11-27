@@ -28,7 +28,14 @@ import {
 import { dayCount, isDateKey, todayKey } from "../../shared/dates";
 import { autostartEnabled, setAutostart } from "../autostart";
 import { isSafeExternalUrl } from "../external-url";
-import { exportJson, exportPath, stageRestore, tableToCsv, writeExport } from "../modules/data/backup";
+import {
+  exportJson,
+  exportPath,
+  importJson,
+  stageRestore,
+  tableToCsv,
+  writeExport,
+} from "../modules/data/backup";
 import type { Services } from "../services/context";
 
 type Handler<K extends ApiName> = (
@@ -461,6 +468,29 @@ const handlers: { [K in ApiName]: Handler<K> } = {
 
   "analytics.range": (p, svc) => svc.analytics(dayCount(p?.days, 30)),
   "analytics.activity": (p, svc) => svc.activity(dayCount(p?.days, 7)),
+  "salah.completion": (p, svc) => svc.salah.completion(dayCount(p?.days, 30)),
+  "time.markUntracked": (p, svc) => {
+    const from = requireDateKey(p?.from, "from");
+    const to = requireDateKey(p?.to, "to");
+    return svc.markUntracked(from, to, typeof p.reason === "string" ? p.reason : null);
+  },
+  "time.mergeEvents": (p, svc) => {
+    requireId(p?.fromId, "fromId");
+    requireId(p?.intoId, "intoId");
+    return svc.mergeFocusEvents(p.fromId, p.intoId);
+  },
+  "data.importJson": (p, svc) => {
+    if (!p || typeof p.path !== "string" || !p.path) throw new Error("path is required");
+    return importJson(svc.db, p.path);
+  },
+  "habits.setReminder": (p, svc) => {
+    requireId(p?.habitId, "habitId");
+    if (p.remindAt !== null && (typeof p.remindAt !== "string" || !/^\d{2}:\d{2}$/.test(p.remindAt))) {
+      throw new Error("remindAt must be HH:MM or null");
+    }
+    svc.habits.setReminder(p.habitId, p.remindAt ?? null);
+    return { ok: true as const };
+  },
   "analytics.hourly": (p, svc) => svc.hourly(dateKeyOrToday(p?.localDate)),
   "analytics.domains": (p, svc) => svc.domains(dayCount(p?.days, 30)),
 

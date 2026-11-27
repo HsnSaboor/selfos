@@ -2,12 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { autostartEnabled, setAutostart } from "../src/main/autostart";
-import { Db } from "../src/main/db/driver";
-import { migrate } from "../src/main/db/migrate";
 import { contrastPairs, contrastRatio, FALLBACK_THEME } from "../src/main/integrations/omarchy-theme";
 import { summarizeDay } from "../src/main/modules/dashboard/summary";
 import type { HabitView } from "../src/shared/api";
-import { freshDb } from "./helpers/db";
 import { tempDir } from "./helpers/temp";
 
 const habit = (over: Partial<HabitView>): HabitView => ({
@@ -223,6 +220,48 @@ describe("round 20", () => {
       id,
     );
     expect(rows.some((r) => r.source === "reading:pages" && r.value === 12)).toBe(true);
+    db.close();
+  });
+});
+
+describe("close-out (S-tier)", () => {
+  it("imports a JSON export and marks ranges untracked", async () => {
+    const { Db } = await import("../src/main/db/driver");
+    const { migrate } = await import("../src/main/db/migrate");
+    const { Services } = await import("../src/main/services/context");
+    const { exportJson, importJson } = await import("../src/main/modules/data/backup");
+    const { writeFileSync } = await import("node:fs");
+    const dir = tempDir("selfos-imp-");
+    const db = Db.open(join(dir, "selfos.sqlite"));
+    migrate(db);
+    const svc = new Services(dir);
+    const json = exportJson(db);
+    const file = join(dir, "export.json");
+    writeFileSync(file, JSON.stringify(json));
+    const res = importJson(db, file);
+    expect(res.imported).toBeGreaterThan(0);
+    expect(svc.markUntracked("2026-11-01", "2026-11-02", "holiday").marked).toBe(true);
+    db.close();
+  });
+
+  it("downsamples raw focus events past the retention window", async () => {
+    const { Db } = await import("../src/main/db/driver");
+    const { migrate } = await import("../src/main/db/migrate");
+    const { downsample } = await import("../src/main/modules/time/aggregate");
+    const db = Db.open(":memory:");
+    migrate(db);
+    const old = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
+    db.run(
+      `INSERT INTO focus_event (started_at, ended_at, local_date, app_class, source, created_at)
+       VALUES (?, ?, ?, 'selfos', 'test', ?)`,
+      Date.now() - 130 * 86_400_000,
+      Date.now() - 130 * 86_400_000 + 3_600_000,
+      old,
+      Date.now(),
+    );
+    const res = downsample(db, 90);
+    expect(res.removed).toBe(1);
+    expect(db.get("SELECT COUNT(*) n FROM focus_hourly")?.n).toBe(1);
     db.close();
   });
 });

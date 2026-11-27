@@ -17,6 +17,7 @@ function testDb(): Db {
     CREATE TABLE day_aggregate (
       local_date TEXT PRIMARY KEY, screen_seconds INTEGER, focused_seconds INTEGER,
       media_seconds INTEGER, reading_seconds INTEGER, switches INTEGER,
+      switches_per_hour REAL NOT NULL DEFAULT 0,
       focus_sessions INTEGER NOT NULL DEFAULT 0,
       longest_focus_seconds INTEGER NOT NULL DEFAULT 0,
       first_activity INTEGER, last_activity INTEGER, rebuilt_at INTEGER

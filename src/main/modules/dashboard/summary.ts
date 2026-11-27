@@ -18,6 +18,7 @@ export interface DayAggregateRow {
   first_activity: number | null;
   last_activity: number | null;
   switches: number;
+  switches_per_hour?: number;
   focus_sessions?: number;
   longest_focus_seconds?: number;
 }
@@ -67,6 +68,7 @@ export function summarizeDay(input: DaySummaryInput): DaySummary {
     firstActivity: agg?.first_activity ?? null,
     lastActivity: agg?.last_activity ?? null,
     switches: agg?.switches ?? 0,
+    switchesPerHour: agg?.switches_per_hour ?? 0,
     focusSessions: agg?.focus_sessions ?? 0,
     longestFocusSeconds: agg?.longest_focus_seconds ?? 0,
   };

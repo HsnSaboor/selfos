@@ -26,7 +26,6 @@ import {
   unionSeconds,
   watchTime,
 } from "../src/main/modules/time/sites";
-import { freshDb } from "./helpers/db";
 import { tempDir } from "./helpers/temp";
 
 function freshDb(): Db {

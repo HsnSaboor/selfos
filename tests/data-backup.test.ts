@@ -18,7 +18,6 @@ import {
 } from "../src/main/modules/data/backup";
 import { addDays } from "../src/main/modules/goals/model";
 import { analyse, dateRange, hourlyProfile, streaks, topDomains } from "../src/main/modules/time/analytics";
-import { freshDb } from "./helpers/db";
 import { tempDir } from "./helpers/temp";
 
 function freshDb(): Db {

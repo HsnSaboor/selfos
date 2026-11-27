@@ -273,7 +273,15 @@ app.whenReady().then(async () => {
       .find(c => c.textContent.includes("author-sample"))?.click()
   `);
   await waitFor(win, 'document.querySelectorAll(".text-layer span").length > 0', 12000);
-  const postOpen = await call("reading.list", undefined);
+  // The author back-fill rides on the page-count report, which is a separate
+  // async IPC after the text layer appears; poll for it instead of racing it.
+  let postOpen = await call("reading.list", undefined);
+  for (let i = 0; i < 12; i++) {
+    const row = postOpen.ok ? postOpen.data.find((b) => b.id === authId) : null;
+    if (row && row.author) break;
+    await new Promise((r) => setTimeout(r, 500));
+    postOpen = await call("reading.list", undefined);
+  }
   const postRow = postOpen.ok ? postOpen.data.find((b) => b.id === authId) : null;
   step(
     "author-backfilled-on-open",

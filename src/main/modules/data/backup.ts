@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
@@ -284,4 +285,45 @@ export function exportPath(
   const safeTable = table ? table.replace(/[^\w.-]/g, "_") : "";
   const name = `selfos-${localDateKey(now)}${safeTable ? `-${safeTable}` : ""}.${ext}`;
   return join(userDataDir, "exports", name);
+}
+
+/**
+ * F-SET-05: import a previous JSON export into a fresh database.
+ *
+ * The file is the same shape `exportJson` writes. Table names come from the
+ * file, so each is checked against sqlite_master and quoted; columns come from
+ * the live schema, and only keys present in both are inserted. A partial or
+ * hand-edited file therefore imports what it can rather than corrupting the DB.
+ */
+export function importJson(db: Db, path: string): { imported: number } {
+  if (!existsSync(path)) throw new Error("import file not found");
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as {
+    tables?: Record<string, Array<Record<string, unknown>>>;
+  };
+  const tables = parsed.tables;
+  if (!tables || typeof tables !== "object") throw new Error("not a SelfOS export");
+  let imported = 0;
+  db.transaction(() => {
+    for (const [name, rows] of Object.entries(tables)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+      const exists = db.get<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        name,
+      );
+      if (!exists || !Array.isArray(rows)) continue;
+      const columns = db.all<{ name: string }>(`PRAGMA table_info("${name}")`).map((c) => c.name);
+      for (const row of rows) {
+        if (!row || typeof row !== "object") continue;
+        const keys = columns.filter((c) => c in row);
+        if (keys.length === 0) continue;
+        db.run(
+          `INSERT OR REPLACE INTO "${name}" (${keys.map((k) => `"${k}"`).join(",")})
+           VALUES (${keys.map(() => "?").join(",")})`,
+          ...keys.map((k) => row[k]),
+        );
+        imported++;
+      }
+    }
+  });
+  return { imported };
 }

@@ -37,9 +37,33 @@ type PdfPage = {
     rotation: number;
   };
   render(p: { canvasContext: CanvasRenderingContext2D; viewport: unknown }): { promise: Promise<void> };
-  getTextContent(): Promise<{ items: Array<{ str: string; transform: number[]; width: number }> }>;
+  getTextContent(): Promise<{
+    items: Array<{ str?: string; transform: number[]; width: number }>;
+  }>;
   cleanup(): void;
 };
+
+/**
+ * One search hit: the page it is on and the matched text with its context.
+ *
+ * Kept as three strings rather than one snippet plus offsets so the renderer
+ * can wrap the match in a `<mark>` without re-finding it — an offset into a
+ * snippet that has been trimmed and ellipsised is not the offset in the page.
+ */
+type SearchHit = { page: number; before: string; match: string; after: string };
+
+/**
+ * Bounds on one search (F-READ-11).
+ *
+ * An 800-page PDF (F-READ-15) would otherwise hold the whole text layer of the
+ * book in memory and take long enough to feel hung. The count of pages actually
+ * read is reported so a capped search does not look like a complete one.
+ */
+const MAX_SEARCH_RESULTS = 200;
+const MAX_SEARCH_PAGES = 500;
+/** Context kept either side of a match, in characters. */
+const SNIPPET_BEFORE = 40;
+const SNIPPET_AFTER = 60;
 
 interface PdfDocumentSource {
   url: string;
@@ -295,6 +319,25 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
   const [pageRotation, setPageRotation] = useState(0);
   /** Markdown from the last export, shown when the clipboard write fails. */
   const [exportText, setExportText] = useState<string | null>(null);
+  /**
+   * In-book search (F-READ-11).
+   *
+   * `searchHits` is `null` until a search has run, so "no results yet" and "no
+   * matches" are different states. `searched` is how far the scan got, which is
+   * what makes the 500-page cap visible instead of silent.
+   */
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(0);
+  /**
+   * Bumped by every new search, cleared search and unmount.
+   *
+   * A scan yields once per page, so an older search is still running when a
+   * newer one starts; without this the older one would finish last and overwrite
+   * the newer results. Each await checks the sequence before writing state.
+   */
+  const searchSeq = useRef(0);
 
   useEffect(() => {
     // `doc` is a dependency so the observer is re-attached once a document is
@@ -825,7 +868,99 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
   useEffect(() => {
     if (!book.id) return;
     restoredRef.current = false;
+    // Invalidate any in-flight scan of the previous book without a state write
+    // in the same commit as the document load (round-20 regression).
+    searchSeq.current++;
   }, [book.id]);
+
+  /**
+   * Scan the document's text layer for `raw`, page by page (F-READ-11).
+   *
+   * `getPage`/`getTextContent` are the same calls the render path uses, so this
+   * reads what the reader shows rather than a second extraction of the file.
+   * Pages are cleaned up as they are scanned — except the page on screen, whose
+   * operator list the render effect owns — so a capped 500-page scan does not
+   * pin 500 pages of decoded data in the worker (F-READ-15).
+   */
+  const runSearch = useCallback(
+    async (raw: string) => {
+      const query = raw.trim();
+      // An empty query is a cleared search, not a scan that matches everywhere.
+      if (!query || !doc) {
+        searchSeq.current++;
+        setSearching(false);
+        setSearchHits(null);
+        setSearched(0);
+        return;
+      }
+
+      const seq = ++searchSeq.current;
+      const needle = query.toLowerCase();
+      const hits: SearchHit[] = [];
+      const lastPage = Math.min(doc.numPages, MAX_SEARCH_PAGES);
+      /** The last page actually read, so a capped scan reports where it stopped. */
+      let reached = 0;
+      setSearching(true);
+      setSearchHits([]);
+      setSearched(0);
+
+      try {
+        for (let n = 1; n <= lastPage; n++) {
+          if (seq !== searchSeq.current) return;
+          const page = await doc.getPage(n);
+          if (seq !== searchSeq.current) return;
+          const text = await page.getTextContent();
+          if (seq !== searchSeq.current) return;
+          if (n !== pageRef.current) page.cleanup();
+          reached = n;
+
+          const content = text.items.map((i) => ("str" in i ? i.str : "")).join(" ");
+          const at = content.toLowerCase().indexOf(needle);
+          // The count is the live progress of the scan, not just its result:
+          // 20 pages between writes keeps a 500-page scan from re-rendering the
+          // reader once per page.
+          if (n % 20 === 0 || at !== -1) setSearched(n);
+          if (at === -1) continue;
+
+          const start = Math.max(0, at - SNIPPET_BEFORE);
+          const end = Math.min(content.length, at + needle.length + SNIPPET_AFTER);
+          hits.push({
+            page: n,
+            before: `${start > 0 ? "…" : ""}${content.slice(start, at)}`,
+            match: content.slice(at, at + needle.length),
+            after: `${content.slice(at + needle.length, end)}${end < content.length ? "…" : ""}`,
+          });
+          if (hits.length >= MAX_SEARCH_RESULTS) break;
+        }
+        if (seq !== searchSeq.current) return;
+        setSearched(reached);
+        setSearchHits(hits);
+        setSearching(false);
+      } catch (e) {
+        if (seq !== searchSeq.current) return;
+        setSearching(false);
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [doc],
+  );
+
+  const clearSearch = useCallback(() => {
+    searchSeq.current++;
+    setSearchQuery("");
+    setSearchHits(null);
+    setSearching(false);
+    setSearched(0);
+  }, []);
+
+  // A search still running when the reader closes must not write state after
+  // unmount, and its page handles are no longer wanted.
+  useEffect(
+    () => () => {
+      searchSeq.current++;
+    },
+    [],
+  );
 
   const updateSettings = (patch: Partial<BookSettingsView>) => {
     const next = { ...settings, ...patch };
@@ -940,6 +1075,38 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
           </button>
         </div>
 
+        <form
+          className="reader-search"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void runSearch(searchQuery);
+          }}
+        >
+          <input
+            className="input"
+            type="search"
+            value={searchQuery}
+            placeholder="Search this book…"
+            aria-label="Search this book"
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <button type="submit" className="mini" disabled={!doc || searching}>
+            {searching ? "searching…" : "search"}
+          </button>
+          {searchQuery || searchHits !== null ? (
+            <button type="button" className="mini" onClick={clearSearch}>
+              clear
+            </button>
+          ) : null}
+          <span className="reader-search-count">
+            {searching
+              ? `${searched} / ${Math.min(doc?.numPages ?? 0, MAX_SEARCH_PAGES)} pages`
+              : searchHits === null
+                ? ""
+                : `${searchHits.length} ${searchHits.length === 1 ? "match" : "matches"}`}
+          </span>
+        </form>
+
         <div className="reader-controls">
           <select
             className="input"
@@ -1027,6 +1194,43 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
 
       {status ? <div className="reader-status">{status}</div> : null}
       {error ? <div className="error">Reader error: {error}</div> : null}
+
+      {/* Search results (F-READ-11). A hit jumps to its page through the same
+          `goTo` the page controls use, so the position write and the scroll
+          reset happen exactly as they do for a page turn. */}
+      {searchHits !== null || searching ? (
+        <div className="reader-search-results">
+          {searching && searchHits !== null && searchHits.length === 0 ? (
+            <div className="muted">Searching…</div>
+          ) : null}
+          {!searching && searchHits !== null && searchHits.length === 0 ? (
+            <div className="muted">No matches for “{searchQuery.trim()}”.</div>
+          ) : null}
+          {searchHits?.map((hit) => (
+            <button
+              key={hit.page}
+              type="button"
+              className={`reader-search-hit${hit.page === page ? " current" : ""}`}
+              onClick={() => goTo(hit.page)}
+            >
+              <span className="reader-search-page">p.{hit.page}</span>
+              <span className="reader-search-snippet">
+                {hit.before}
+                <mark>{hit.match}</mark>
+                {hit.after}
+              </span>
+            </button>
+          ))}
+          {searchHits !== null && searchHits.length >= MAX_SEARCH_RESULTS ? (
+            <div className="muted">First {MAX_SEARCH_RESULTS} matches only.</div>
+          ) : null}
+          {searchHits !== null && searched < (doc?.numPages ?? 0) && !searching ? (
+            <div className="muted">
+              Searched {searched} of {doc?.numPages} pages.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className={`reader-body layout-${settings.layout}`}>
         <div className="reader-canvas-wrap" ref={wrapRef}>

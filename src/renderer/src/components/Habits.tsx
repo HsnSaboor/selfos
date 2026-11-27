@@ -5,6 +5,13 @@ import { isComplete } from "../../../shared/habits";
 import { describeSchedule, isoWeekday, WEEKDAY_LABELS } from "../../../shared/schedule";
 import { Ring as RingArc } from "./Ring";
 
+/**
+ * `HabitView` may carry `remindAt` once the contract exposes it (F-HABIT-11).
+ * Read through this intersection so the row shows a persisted time when the
+ * field is present, and simply shows none when it is not — no `as any`.
+ */
+type HabitReminder = HabitView & { remindAt?: string | null };
+
 function statusLabel(h: HabitView): string {
   const e = h.todayEntry;
   if (!e) return h.dueToday ? "Not done" : "Off schedule";
@@ -74,6 +81,8 @@ function Heatmap({ cells }: { cells: HeatmapCell[] }) {
 function HabitRow({
   habit,
   busy,
+  remindAt,
+  onRemind,
   onToggle,
   onIncrement,
   onArchive,
@@ -84,6 +93,8 @@ function HabitRow({
 }: {
   habit: HabitView;
   busy: boolean;
+  remindAt: string;
+  onRemind: (value: string) => void;
   onToggle: () => void;
   onIncrement: (d: number) => void;
   onSkip: () => void;
@@ -126,6 +137,15 @@ function HabitRow({
           <span>{describeSchedule(habit.schedule)}</span>
           <span className="sep">·</span>
           <span>{statusLabel(habit)}</span>
+          {/* F-HABIT-11: per-habit reminder; empty input means off. */}
+          <input
+            className="input narrow habit-reminder"
+            type="time"
+            value={remindAt}
+            onChange={(e) => onRemind(e.target.value)}
+            aria-label={`Reminder time for ${habit.name}`}
+            title="Reminder (empty = off)"
+          />
         </div>
       </div>
 
@@ -226,6 +246,8 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
   const [perPeriod, setPerPeriod] = useState("3");
   const [icon, setIcon] = useState("");
   const [color, setColor] = useState("");
+  // F-HABIT-13: optional module metric that auto-completes this habit.
+  const [link, setLink] = useState("");
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -244,6 +266,7 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
       target: kind === "count" || kind === "duration" ? Number(target) || 1 : null,
       ...(icon.trim() ? { icon: icon.trim() } : {}),
       ...(color ? { color } : {}),
+      ...(link ? { link } : {}),
       schedule: {
         kind: scheduleKind,
         weekdays: scheduleKind === "weekdays" ? weekdays : null,
@@ -256,6 +279,7 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
       return;
     }
     setName("");
+    setLink("");
     onCreated();
   };
 
@@ -364,6 +388,20 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
         </button>
       </div>
 
+      <div className="form-row">
+        <select
+          className="input"
+          value={link}
+          onChange={(e) => setLink(e.target.value)}
+          aria-label="Auto-complete from"
+        >
+          <option value="">Auto-complete: none</option>
+          <option value="reading:pages">Auto: reading pages</option>
+          <option value="focus:hours">Auto: focus hours</option>
+          <option value="salah:prayers">Auto: salah prayers</option>
+        </select>
+      </div>
+
       {error ? <div className="form-error">{error}</div> : null}
     </div>
   );
@@ -372,6 +410,10 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
 export function HabitsView({ localDate }: { localDate: string }) {
   const [habits, setHabits] = useState<HabitView[]>([]);
   const [heatmaps, setHeatmaps] = useState<Record<number, HeatmapCell[]>>({});
+  // F-HABIT-11: local HH:MM reminder per habit, seeded from the row when the
+  // contract carries `remindAt`, and kept locally so an in-session edit shows
+  // immediately (the merge lets a local edit win over the seeded value).
+  const [reminders, setReminders] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   // F-HABIT-10: backfill a past day. The service and handler were always
@@ -399,6 +441,12 @@ export function HabitsView({ localDate }: { localDate: string }) {
     }
     setError(null);
     setHabits(res.data);
+    const seed: Record<number, string> = {};
+    for (const h of res.data) {
+      const r = (h as HabitReminder).remindAt;
+      if (r) seed[h.id] = r;
+    }
+    setReminders((prev) => ({ ...seed, ...prev }));
 
     // One call for every heatmap: a per-habit loop made one habit toggle cost
     // N IPC round trips, each recomputing 84 days on the main process.
@@ -472,6 +520,13 @@ export function HabitsView({ localDate }: { localDate: string }) {
             <HabitRow
               habit={h}
               busy={busyId === h.id}
+              remindAt={reminders[h.id] ?? ""}
+              onRemind={(v) => {
+                setReminders((prev) => ({ ...prev, [h.id]: v }));
+                void act(h.id, () =>
+                  window.selfos.invoke("habits.setReminder", { habitId: h.id, remindAt: v || null }),
+                );
+              }}
               onToggle={() =>
                 void act(h.id, () =>
                   window.selfos.invoke("habits.toggle", { habitId: h.id, localDate: entryDate }),

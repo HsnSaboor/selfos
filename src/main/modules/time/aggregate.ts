@@ -5,6 +5,8 @@
  * that can always be rebuilt. Screen time = sum of all focus segments;
  * focused time = screen time minus short "switch noise" segments.
  */
+
+import { localDateKey } from "../../../shared/dates";
 import type { Db } from "../../db/driver";
 
 export const SWITCH_NOISE_MS = 15_000;
@@ -18,6 +20,7 @@ export interface DayAggregate {
   mediaSeconds: number;
   readingSeconds: number;
   switches: number;
+  switchesPerHour: number;
   focusSessions: number;
   longestFocusSeconds: number;
   firstActivity: number | null;
@@ -87,6 +90,8 @@ export function computeDayAggregate(db: Db, localDate: string, readingSeconds = 
     mediaSeconds: Math.round(mediaMs / 1000),
     readingSeconds: Math.round(readingSeconds),
     switches,
+    switchesPerHour:
+      first && last ? Math.round((switches / Math.max(1, (last - first) / 3_600_000)) * 100) / 100 : 0,
     focusSessions,
     longestFocusSeconds: Math.round(longestFocus / 1000),
     firstActivity: first,
@@ -98,14 +103,15 @@ export function writeDayAggregate(db: Db, agg: DayAggregate): void {
   db.run(
     `INSERT INTO day_aggregate
        (local_date, screen_seconds, focused_seconds, media_seconds, reading_seconds,
-        switches, focus_sessions, longest_focus_seconds, first_activity, last_activity, rebuilt_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        switches, switches_per_hour, focus_sessions, longest_focus_seconds, first_activity, last_activity, rebuilt_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(local_date) DO UPDATE SET
        screen_seconds  = excluded.screen_seconds,
        focused_seconds = excluded.focused_seconds,
        media_seconds   = excluded.media_seconds,
        reading_seconds = excluded.reading_seconds,
        switches        = excluded.switches,
+       switches_per_hour = excluded.switches_per_hour,
        focus_sessions  = excluded.focus_sessions,
        longest_focus_seconds = excluded.longest_focus_seconds,
        first_activity  = excluded.first_activity,
@@ -117,6 +123,7 @@ export function writeDayAggregate(db: Db, agg: DayAggregate): void {
     agg.mediaSeconds,
     agg.readingSeconds,
     agg.switches,
+    agg.switchesPerHour,
     agg.focusSessions,
     agg.longestFocusSeconds,
     agg.firstActivity,
@@ -129,4 +136,42 @@ export function rebuildDay(db: Db, localDate: string, readingSeconds = 0): DayAg
   const agg = computeDayAggregate(db, localDate, readingSeconds);
   writeDayAggregate(db, agg);
   return agg;
+}
+
+/**
+ * F-TIME-15: downsample raw focus events older than `days` into hourly rows.
+ *
+ * Daily aggregates are kept forever; the raw rows are the bulk of the database,
+ * so after the retention window they are replaced by the hourly summary. The
+ * hourly rows are keyed by (day, hour, class), so re-running is idempotent.
+ */
+export function downsample(db: Db, days = 90, now = new Date()): { hours: number; removed: number } {
+  const cutoff = new Date(now.getTime() - days * 86_400_000);
+  const cutoffKey = localDateKey(cutoff);
+  const rows = db.all<{ local_date: string; hour: number; app_class: string; seconds: number }>(
+    `SELECT local_date,
+            CAST(strftime('%H', started_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+            app_class,
+            SUM(ended_at - started_at) AS seconds
+       FROM focus_event
+      WHERE local_date < ?
+      GROUP BY local_date, hour, app_class`,
+    cutoffKey,
+  );
+  let removed = 0;
+  db.transaction(() => {
+    for (const r of rows) {
+      db.run(
+        `INSERT INTO focus_hourly (local_date, hour, app_class, seconds)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(local_date, hour, app_class) DO UPDATE SET seconds = excluded.seconds`,
+        r.local_date,
+        r.hour,
+        r.app_class,
+        Math.round(r.seconds / 1000),
+      );
+    }
+    removed = db.run("DELETE FROM focus_event WHERE local_date < ?", cutoffKey).changes;
+  });
+  return { hours: rows.length, removed };
 }

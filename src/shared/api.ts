@@ -70,6 +70,8 @@ export interface DaySummary {
   focusSessions: number;
   /** F-TIME-10: longest single focus stretch, seconds. */
   longestFocusSeconds: number;
+  /** F-TIME-10: app-class switches per active hour. */
+  switchesPerHour: number;
 }
 
 export interface HealthReport {
@@ -231,6 +233,10 @@ export interface HeatmapCell {
 export interface NewHabitInput {
   name: string;
   kind: HabitKind;
+  /** F-HABIT-13: module metric that auto-completes this habit. */
+  link?: string | null;
+  /** F-HABIT-11: optional local HH:MM reminder. */
+  remindAt?: string | null;
   unit?: string | null;
   target?: number | null;
   icon?: string | null;
@@ -802,6 +808,14 @@ export interface Api {
 
   "analytics.range": { params: { days?: number }; result: AnalyticsView };
   "analytics.activity": { params: { days?: number }; result: ActivityCellView[] };
+  "salah.completion": {
+    params: { days?: number };
+    result: Array<{ localDate: string; logged: number; total: number }>;
+  };
+  "time.markUntracked": { params: { from: string; to: string; reason?: string }; result: { marked: true } };
+  "time.mergeEvents": { params: { fromId: number; intoId: number }; result: { merged: true } };
+  "data.importJson": { params: { path: string }; result: { imported: number } };
+  "habits.setReminder": { params: { habitId: number; remindAt: string | null }; result: { ok: true } };
   "analytics.hourly": { params: { localDate?: string }; result: HourBucketView[] };
   "analytics.domains": { params: { days?: number }; result: DomainUsageView[] };
 
@@ -877,6 +891,11 @@ export const API_CHANNELS = [
   "analytics.hourly",
   "analytics.range",
   "analytics.activity",
+  "salah.completion",
+  "time.markUntracked",
+  "time.mergeEvents",
+  "data.importJson",
+  "habits.setReminder",
   "backup.create",
   "backup.restore",
   "backup.status",

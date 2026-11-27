@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { extname, join, relative, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 
 import { app, BrowserWindow, dialog, Menu, nativeImage, protocol, shell, Tray } from "electron";
@@ -431,6 +431,7 @@ if (!gotLock) {
       };
       services.startTracking();
       services.startBackups();
+      services.startReminders();
       services.startHistoryIngest();
       // Prime the salah time cache so the dashboard header shows the same Hijri
       // date the Salah module will, rather than falling back to Intl.

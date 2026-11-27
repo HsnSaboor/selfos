@@ -289,7 +289,7 @@ export function AnalyticsView() {
                     const intensity = Math.min(1, (cell?.seconds ?? 0) / activityMax);
                     return (
                       <span
-                        key={`${weekday}-${hour}`}
+                        key={`${label}-${hour}`}
                         className="heatmap-cell"
                         style={{
                           background: `color-mix(in srgb, var(--accent) ${intensity * 100}%, transparent)`,

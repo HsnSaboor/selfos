@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { app } from "electron";
+import { app, Notification } from "electron";
 import type {
   ActivityCellView,
   AnalyticsView,
@@ -25,6 +25,7 @@ import type {
   TimelineSegment,
 } from "../../shared/api";
 import { localDateKey } from "../../shared/dates";
+import { isComplete } from "../../shared/habits";
 import { autostartEnabled } from "../autostart";
 import { Db } from "../db/driver";
 import { currentVersion, migrate } from "../db/migrate";
@@ -46,6 +47,7 @@ import { HabitsService } from "../modules/habits/service";
 import { NotesService } from "../modules/notes/service";
 import { ReadingService } from "../modules/reading/service";
 import { SalahService } from "../modules/salah/service";
+import { downsample } from "../modules/time/aggregate";
 import {
   activityMatrix,
   analyse,
@@ -135,6 +137,7 @@ export class Services {
   readonly goals: GoalsService;
   readonly backup: BackupService;
   #backupTimer: NodeJS.Timeout | null = null;
+  #reminderTimer: NodeJS.Timeout | null = null;
   #integrity = "unchecked";
   #integrityAt: number | null = null;
   readonly #earlyoom = detectEarlyoomPreference();
@@ -386,6 +389,7 @@ export class Services {
         // written on every tick and every launch, so "last backup" showed the
         // last attempt.
         const made = this.backup.runScheduled();
+        if (made) downsample(this.db, 90);
         if (made) this.#stampBackup();
       } catch (err) {
         console.error("[backup] failed:", err instanceof Error ? err.message : err);
@@ -421,6 +425,37 @@ export class Services {
   #lastBackupAt(): number | null {
     const row = this.db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'last_backup_at'");
     return row?.value ? Number(row.value) : null;
+  }
+
+  /**
+   * F-HABIT-11: per-habit reminder times, suppressed once the day is complete.
+   * A row in notification_log makes each reminder fire at most once.
+   */
+  startReminders(): void {
+    const tick = () => this.#checkReminders();
+    this.#reminderTimer = setInterval(tick, 30_000);
+  }
+
+  #checkReminders(): void {
+    const now = new Date();
+    const day = localDateKey(now);
+    const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const habits = this.db.all<{ id: number; name: string; remind_at: string | null }>(
+      "SELECT id, name, remind_at FROM habit WHERE remind_at IS NOT NULL AND archived_at IS NULL",
+    );
+    for (const h of habits) {
+      if (h.remind_at !== hhmm) continue;
+      const key = `${day}:${h.id}:${hhmm}`;
+      if (this.db.get("SELECT key FROM notification_log WHERE key = ?", key)) continue;
+      const state = this.habits.list(day).find((v) => v.id === h.id);
+      if (!state?.dueToday || isComplete(state, state.todayEntry)) continue;
+      try {
+        new Notification({ title: "SelfOS habit", body: h.name }).show();
+        this.db.run("INSERT INTO notification_log (key, sent_at) VALUES (?, ?)", key, Date.now());
+      } catch (err) {
+        console.error("[reminder] failed:", err instanceof Error ? err.message : err);
+      }
+    }
   }
 
   analytics(days = 30): AnalyticsView {
@@ -593,6 +628,7 @@ export class Services {
   }
   rebuildDay(localDate: string): { rebuilt: string } {
     this.collector.rebuild(localDate);
+    this.habits.refreshLinked(localDate);
     this.#refreshAutoGoals(localDate);
     return { rebuilt: localDate };
   }
@@ -650,6 +686,7 @@ export class Services {
     const days = daysToRebuild(this.db);
     for (const day of days) {
       this.collector.rebuild(day);
+      this.habits.refreshLinked(day);
       this.#refreshAutoGoals(day);
     }
     return { rebuilt: days.length };
@@ -731,8 +768,48 @@ export class Services {
     return { deleted };
   }
 
+  /** F-TIME-12: declare a range untracked (a gap the user asserted). */
+  markUntracked(from: string, to: string, reason: string | null): { marked: true } {
+    this.db.run(
+      `INSERT INTO untracked_range (from_date, to_date, reason) VALUES (?, ?, ?)
+       ON CONFLICT(from_date) DO UPDATE SET to_date = excluded.to_date, reason = excluded.reason`,
+      from,
+      to,
+      reason,
+    );
+    return { marked: true };
+  }
+
+  /** F-TIME-12: merge two misattributed focus events into the earlier one. */
+  mergeFocusEvents(fromId: number, intoId: number): { merged: true } {
+    const a = this.db.get<{ started_at: number; ended_at: number }>(
+      "SELECT started_at, ended_at FROM focus_event WHERE id = ?",
+      fromId,
+    );
+    const b = this.db.get<{ started_at: number; ended_at: number }>(
+      "SELECT started_at, ended_at FROM focus_event WHERE id = ?",
+      intoId,
+    );
+    if (!a || !b) throw new Error("event not found");
+    const [first, second] = a.started_at <= b.started_at ? [a, b] : [b, a];
+    this.db.transaction(() => {
+      this.db.run(
+        "UPDATE focus_event SET ended_at = MAX(ended_at, ?) WHERE id = ?",
+        second.ended_at,
+        first.started_at === a.started_at ? fromId : intoId,
+      );
+      this.db.run(
+        "DELETE FROM focus_event WHERE id = ?",
+        first.started_at === a.started_at ? intoId : fromId,
+      );
+    });
+    this.collector.rebuild(localDateKey(new Date(first.started_at)));
+    return { merged: true };
+  }
+
   close(): void {
     if (this.#backupTimer) clearInterval(this.#backupTimer);
+    if (this.#reminderTimer) clearInterval(this.#reminderTimer);
     if (this.#ingestTimer) clearInterval(this.#ingestTimer);
     // The worker holds its own connection to the database, so it must be gone
     // before `db.close()`: a worker still mid-transaction would keep the file

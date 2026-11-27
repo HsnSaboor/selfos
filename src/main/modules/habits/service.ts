@@ -55,6 +55,8 @@ export interface NewHabit {
   target?: number | null;
   icon?: string | null;
   color?: string | null;
+  link?: string | null;
+  remindAt?: string | null;
   schedule: {
     kind: ScheduleKind;
     weekdays?: number[] | null;
@@ -139,14 +141,16 @@ export class HabitsService {
   create(input: NewHabit, today: string): number {
     if (!input.name?.trim()) throw new Error("habit name is required");
     const result = this.#db.run(
-      `INSERT INTO habit (name, kind, unit, target, icon, color, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO habit (name, kind, unit, target, icon, color, link, remind_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       input.name.trim(),
       input.kind,
       input.unit ?? null,
       input.target ?? null,
       input.icon ?? null,
       input.color ?? null,
+      input.link ?? null,
+      input.remindAt ?? null,
       Date.now(),
     );
     const id = Number(result.lastInsertRowid);
@@ -160,6 +164,14 @@ export class HabitsService {
    */
   changeSchedule(habitId: number, schedule: NewHabit["schedule"], effectiveFrom: string): void {
     this.#insertSchedule(habitId, schedule, effectiveFrom);
+  }
+
+  /** F-HABIT-11: set (or clear) a local HH:MM reminder. */
+  setReminder(habitId: number, remindAt: string | null): void {
+    if (remindAt !== null && !/^\d{2}:\d{2}$/.test(remindAt)) {
+      throw new Error("remindAt must be HH:MM");
+    }
+    this.#db.run("UPDATE habit SET remind_at = ? WHERE id = ?", remindAt, habitId);
   }
 
   archive(habitId: number, archived: boolean): void {
@@ -277,6 +289,53 @@ export class HabitsService {
       out[habit.id] = heatmapDays({ habit, versions, entries, today }, days);
     }
     return out;
+  }
+
+  /**
+   * F-HABIT-13: upsert linked-habit entries from module metrics.
+   * `link` is "module:metric" (reading:pages, focus:hours, salah:prayers).
+   */
+  refreshLinked(localDate: string): number {
+    const rows = this.#db.all<{ id: number; kind: string; target: number | null; link: string }>(
+      "SELECT id, kind, target, link FROM habit WHERE link IS NOT NULL AND archived_at IS NULL",
+    );
+    let changed = 0;
+    for (const h of rows) {
+      let value: number | null = null;
+      if (h.link === "reading:pages") {
+        value =
+          this.#db.get<{ n: number | null }>(
+            "SELECT SUM(pages_turned) AS n FROM reading_session WHERE local_date = ?",
+            localDate,
+          )?.n ?? 0;
+      } else if (h.link === "focus:hours") {
+        const s = this.#db.get<{ ms: number }>(
+          "SELECT SUM(ended_at - started_at) AS ms FROM focus_event WHERE local_date = ?",
+          localDate,
+        );
+        value = Math.round((s?.ms ?? 0) / 3_600_000);
+      } else if (h.link === "salah:prayers") {
+        value =
+          this.#db.get<{ n: number }>("SELECT COUNT(*) AS n FROM prayer_log WHERE local_date = ?", localDate)
+            ?.n ?? 0;
+      }
+      if (value === null) continue;
+      const target = h.target ?? 1;
+      const status = value >= target ? "done" : value > 0 ? "partial" : "skipped";
+      this.#db.run(
+        `INSERT INTO habit_entry (habit_id, local_date, value, status, source, created_at)
+         VALUES (?, ?, ?, ?, 'linked', ?)
+         ON CONFLICT(habit_id, local_date) DO UPDATE SET
+           value = excluded.value, status = excluded.status, source = 'linked'`,
+        h.id,
+        localDate,
+        value,
+        status,
+        Date.now(),
+      );
+      changed++;
+    }
+    return changed;
   }
 
   // ── row loading ───────────────────────────────────────────────────────

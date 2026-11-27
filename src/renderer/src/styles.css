@@ -1379,3 +1379,56 @@ button.link {
 /* F-READ-04: single-page mode fixes the viewport; scroll mode keeps the\n   scrollable column. */
 .reader-body.layout-single .reader-canvas-wrap { overflow: hidden; }
 .reader-body.layout-scroll .reader-canvas-wrap { overflow: auto; }
+
+/* in-book search (F-READ-11) */
+.reader-search { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.reader-search .input { width: 200px; }
+.reader-search-count { font-size: 10px; color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.reader-search-results {
+  max-height: 190px; overflow-y: auto; margin-bottom: 10px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--bg-sunken);
+  border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  border-radius: var(--radius);
+  font-size: 11px;
+}
+
+.reader-search-hit {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 4px 6px; border: 1px solid transparent; border-radius: 5px;
+  background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer;
+}
+.reader-search-hit:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.reader-search-hit.current { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.reader-search-page { flex: none; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.reader-search-snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-search-snippet mark {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--fg); border-radius: 2px; padding: 0 1px;
+}
+
+/* F-SALAH-07: completion heatmap — columns are weeks, rows are weekdays. */
+.salah-complete-panel .panel-head { margin-bottom: 10px; }
+.salah-complete-grid {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.salah-complete-week { display: flex; flex-direction: column; gap: 3px; }
+.salah-complete-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex: none;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.salah-complete-cell.full { background: var(--accent); }
+.salah-complete-cell.partial { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.salah-complete-cell.empty { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.salah-complete-cell.pad { background: transparent; }
+.salah-complete-panel .legend-item .salah-complete-cell { width: 10px; height: 10px; }
+
+/* F-HABIT-11: per-habit reminder time input in the row meta. */
+.habit-reminder { width: 96px; }

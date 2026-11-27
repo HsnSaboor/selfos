@@ -7,10 +7,10 @@
  * plays audio (F-SALAH-09).
  */
 import { readFileSync } from "node:fs";
+import { PRAYER_COUNT } from "../../../shared/api";
 import { localDateKey } from "../../../shared/dates";
 import type { Db } from "../../db/driver";
 import {
-  PRAYER_LABELS,
   PRAYERS,
   type PrayerId,
   type PrayerSlot,
@@ -215,6 +215,19 @@ export class SalahService {
     const repay = Math.min(Math.abs(count), outstanding);
     if (repay > 0) this.addQada(prayer, -repay, localDate ?? localDateKey(new Date()));
     return qadaDebt(this.qadaEvents());
+  }
+
+  /** F-SALAH-07: daily completion for the weekly/monthly heatmap. */
+  completion(days = 30, now = new Date()): Array<{ localDate: string; logged: number; total: number }> {
+    const out: Array<{ localDate: string; logged: number; total: number }> = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 86_400_000);
+      const key = localDateKey(d);
+      const logged =
+        this.#db.get<{ n: number }>("SELECT COUNT(*) AS n FROM prayer_log WHERE local_date = ?", key)?.n ?? 0;
+      out.push({ localDate: key, logged, total: PRAYER_COUNT });
+    }
+    return out;
   }
 
   /** Per-prayer completion for the heatmap (last N days). */

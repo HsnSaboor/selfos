@@ -28,6 +28,13 @@ export function DataPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** F-TIME-12 corrections: an untracked range, an event merge, a JSON import. */
+  const [untrackedFrom, setUntrackedFrom] = useState("");
+  const [untrackedTo, setUntrackedTo] = useState("");
+  const [untrackedReason, setUntrackedReason] = useState("");
+  const [mergeFrom, setMergeFrom] = useState("");
+  const [mergeInto, setMergeInto] = useState("");
+  const [importPath, setImportPath] = useState("");
 
   const load = useCallback(async () => {
     const [b, t, h, s, a] = await Promise.all([
@@ -154,6 +161,131 @@ export function DataPage() {
             }
           >
             Check integrity
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Time corrections</h2>
+        <p className="muted panel-note">
+          Fix tracking mistakes. Marking a range untracked drops it from totals; merging folds one focus event
+          into another. Both rebuild the affected days. Importing a JSON export replaces matching rows by
+          primary key.
+        </p>
+
+        <h3>Mark a range untracked</h3>
+        <div className="form-row">
+          <input
+            className="input"
+            type="date"
+            value={untrackedFrom}
+            onChange={(e) => setUntrackedFrom(e.target.value)}
+            aria-label="Untracked from date"
+          />
+          <input
+            className="input"
+            type="date"
+            value={untrackedTo}
+            onChange={(e) => setUntrackedTo(e.target.value)}
+            aria-label="Untracked to date"
+          />
+          <input
+            className="input"
+            value={untrackedReason}
+            onChange={(e) => setUntrackedReason(e.target.value)}
+            aria-label="Untracked reason"
+            placeholder="reason (optional)"
+          />
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy || !untrackedFrom || !untrackedTo}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  `Mark ${untrackedFrom} → ${untrackedTo} untracked? This removes the range from totals.`,
+                )
+              )
+                return;
+              void run("Range marked untracked", async () => {
+                const res = await window.selfos.invoke("time.markUntracked", {
+                  from: untrackedFrom,
+                  to: untrackedTo,
+                  reason: untrackedReason.trim() || undefined,
+                });
+                return res.ok ? { ok: true } : { ok: false, error: res.error };
+              });
+            }}
+          >
+            Mark untracked
+          </button>
+        </div>
+
+        <h3>Merge two focus events</h3>
+        <div className="form-row">
+          <input
+            className="input narrow"
+            type="number"
+            value={mergeFrom}
+            onChange={(e) => setMergeFrom(e.target.value)}
+            aria-label="Merge from event id"
+            placeholder="from id"
+          />
+          <input
+            className="input narrow"
+            type="number"
+            value={mergeInto}
+            onChange={(e) => setMergeInto(e.target.value)}
+            aria-label="Merge into event id"
+            placeholder="into id"
+          />
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy || !mergeFrom || !mergeInto}
+            onClick={() => {
+              const fromId = Number(mergeFrom);
+              const intoId = Number(mergeInto);
+              if (!Number.isInteger(fromId) || !Number.isInteger(intoId) || fromId === intoId) {
+                setError("Enter two different focus-event ids.");
+                return;
+              }
+              if (!window.confirm(`Merge focus event ${fromId} into ${intoId}? This cannot be undone.`))
+                return;
+              void run("Focus events merged", async () => {
+                const res = await window.selfos.invoke("time.mergeEvents", { fromId, intoId });
+                return res.ok ? { ok: true } : { ok: false, error: res.error };
+              });
+            }}
+          >
+            Merge events
+          </button>
+        </div>
+
+        <h3>Import a JSON export</h3>
+        <div className="form-row">
+          <input
+            className="input grow"
+            value={importPath}
+            onChange={(e) => setImportPath(e.target.value)}
+            aria-label="Export file path"
+            placeholder="/path/to/export.json"
+          />
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy || !importPath.trim()}
+            onClick={() => {
+              if (!window.confirm(`Import ${importPath}? Matching rows are replaced by primary key.`)) return;
+              void run("JSON imported", async () => {
+                const res = await window.selfos.invoke("data.importJson", { path: importPath.trim() });
+                return res.ok
+                  ? { ok: true, message: `Imported ${res.data.imported} rows` }
+                  : { ok: false, error: res.error };
+              });
+            }}
+          >
+            Import
           </button>
         </div>
       </section>
