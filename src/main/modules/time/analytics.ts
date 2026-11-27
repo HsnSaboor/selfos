@@ -274,7 +274,6 @@ export function timelineSegments(
   appClass: string;
   appTitle: string;
   seconds: number;
-  category: string;
 }> {
   const rows = db.all<{ started_at: number; ended_at: number; app_class: string; app_title: string | null }>(
     `SELECT started_at, ended_at, app_class, app_title
@@ -287,7 +286,6 @@ export function timelineSegments(
     appClass: r.app_class,
     appTitle: r.app_title ?? "",
     seconds: Math.max(0, Math.round((r.ended_at - r.started_at) / 1000)),
-    category: "App",
   }));
 }
 

@@ -2479,3 +2479,42 @@ Reviewers: `design_critic` (6 Majors, 5 Nits), `codebase_details` (5 Nits),
 | verifiers | all green (M1 skipped/1 step) |
 
 **Round 17 reviewer status:** all three reported. Not clean.
+
+---
+
+# Round 18 — whole-codebase security, performance and documentation truth
+
+Reviewers: `design_critic` (1 Major, 3 Nits), `codebase_details` (3 Blockers,
+11 Majors, 9 Nits), `zoom_out` (2 Majors, 9 Nits — one already fixed in R16).
+All reported; not clean.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 342 | BLOCKER | STACK §5.3 still documented the removed immutable fast path | FIXED |
+| 343 | BLOCKER | STACK listed 4 uninstalled libraries as current | FIXED — marked target |
+| 344 | BLOCKER | STACK claimed Tailwind CSS v4 | FIXED — hand-written CSS |
+| 345 | MAJOR | IPC example named nonexistent methods | FIXED — real names |
+| 200 | MAJOR | Stale "strip not implemented" comment | FIXED |
+| 346 | MAJOR | 60 s session close, 12-page LRU, 30 s salah timer, scheduler bullet | FIXED — corrected |
+| 347 | MAJOR | Layout tree cited nonexistent paths | FIXED — marked planned |
+| 348 | MAJOR | Testing Library/happy-dom claimed | FIXED — target only |
+| 349 | MAJOR | dates.ts claimed a re-export that no longer exists | FIXED |
+| 350 | MAJOR | PRD C-5/C-6 cited nonexistent sections | FIXED |
+| 351 | MAJOR | Schema omitted 0002/0003 columns | FIXED |
+| 352 | MAJOR | `immutable` strategy/option/CSS vestige | FIXED — removed |
+| 353 | MAJOR | Ingest always-snapshot writes ~2.6 GB/day | RECORDED — bounded by the 4 h cadence and 800 MB ceiling; a race-safe immutable path is future work |
+| 354 | NIT | App-protocol containment duplicated condition | FIXED — shared `isInside` |
+| 355 | NIT | `categoryForDomain` reloaded rules per segment (N+1) | FIXED — rules loaded once |
+| 206 | NIT | Timeline category field dead | FIXED — removed from analytics |
+| 356 | NIT | `#exportFor` dead count | FIXED |
+| 357 | NIT | palette/FTS/windowtitle/dashboard/titlebar/pragma/computeStreak/safetyCopy docs | FIXED |
+
+## Round 18 verification
+
+| Check | Result |
+|---|---|
+| `tsc` / `biome` | clean |
+| `vitest` | **465 passed** |
+| verifiers | all green; M1 skipped |
+
+**Round 18 reviewer status:** all three reported. Not clean.

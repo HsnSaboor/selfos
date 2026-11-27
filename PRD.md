@@ -161,7 +161,7 @@ Scope decision: **PDF only**, with **display overrides on the original page** (n
 | F-READ-17 | Two-page spread mode for landscape documents. | MAY |
 | F-READ-18 | OCR for scanned PDFs (making them highlightable). | MAY (see N-*) |
 
-> **Constraint C-5:** Highlight persistence depends on a stable text-range representation across renderer versions. The stack document must specify the anchor format and a migration path (see `STACK.md` §7.3).
+> **Constraint C-5:** Highlight persistence depends on a stable text-range representation across renderer versions. The stack document must specify the anchor format and a migration path (see `STACK.md` §6.3).
 
 > **Note on constraint IDs:** `C-n` identifiers are **local to this document**. `STACK.md` uses its own `C-n` and `S-n` numbering for a different set of constraints and risks; always cite them as "PRD C-n" or "STACK C-n" when crossing documents.
 
@@ -187,7 +187,7 @@ Scope: **boolean, count/quantity, duration, and negative/avoidance** habits, wit
 | F-HABIT-14 | Today view: all habits for today with a single progress ring; one-tap completion from the dashboard. | MUST |
 | F-HABIT-15 | Reordering habits via drag. | SHOULD |
 
-> **Constraint C-6:** A habit's schedule can change over time. Historical streaks must be computed against the schedule **in effect on that date**, so schedule changes must be versioned, not overwritten (see `STACK.md` §7.2).
+> **Constraint C-6:** A habit's schedule can change over time. Historical streaks must be computed against the schedule **in effect on that date**, so schedule changes must be versioned, not overwritten (see `STACK.md` §4.2 and §7).
 
 ### 5.4 Screen time and watch time (F-TIME)
 

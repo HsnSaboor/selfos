@@ -46,7 +46,7 @@ export interface ProfileConfig {
   historyPath: string;
 }
 
-export type Strategy = "immutable" | "snapshot" | "unavailable";
+export type Strategy = "snapshot" | "unavailable";
 
 export interface VisitRow {
   url: string;
@@ -233,7 +233,7 @@ export class BrowserHistoryIngest {
       // The snapshot is opened read-write so SQLite can recover a copied hot
       // journal; an immutable or read-only open would ignore it and could read
       // a torn B-tree.
-      source = Db.open(readPath, { readonly: false, immutable: false });
+      source = Db.open(readPath);
 
       // Drain pages until the profile is caught up, so a first run does not
       // leave most of the backfill unread. Each page advances the watermark

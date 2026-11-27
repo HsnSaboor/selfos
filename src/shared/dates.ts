@@ -3,8 +3,7 @@
  *
  * The local date is the key every table is bucketed by (STACK D-04), so there
  * must be exactly one implementation: a DST or timezone fix applied in one
- * process has to reach the others. `src/main/modules/time/aggregate.ts`
- * re-exports this, so main-process imports keep working.
+ * process has to reach the others. Main-process modules import it directly.
  */
 
 /** `YYYY-MM-DD` in the machine's local timezone. */

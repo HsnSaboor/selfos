@@ -96,7 +96,7 @@ export interface HealthReport {
     exists: boolean;
     lastIngestAt: number | null;
     watermarkUs: string | null;
-    strategy: "immutable" | "snapshot" | "unavailable";
+    strategy: "snapshot" | "unavailable";
   }>;
   earlyoomPreference: boolean;
   /** F-SHELL-05: whether the XDG autostart entry is installed. */

@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { tempDir } from "./helpers/temp";
-import { freshDb } from "./helpers/db";
+import { autostartEnabled, setAutostart } from "../src/main/autostart";
 import { Db } from "../src/main/db/driver";
 import { migrate } from "../src/main/db/migrate";
-import { autostartEnabled, setAutostart } from "../src/main/autostart";
 import { contrastPairs, contrastRatio, FALLBACK_THEME } from "../src/main/integrations/omarchy-theme";
 import { summarizeDay } from "../src/main/modules/dashboard/summary";
 import type { HabitView } from "../src/shared/api";
+import { freshDb } from "./helpers/db";
+import { tempDir } from "./helpers/temp";
 
 const habit = (over: Partial<HabitView>): HabitView => ({
   id: 1,

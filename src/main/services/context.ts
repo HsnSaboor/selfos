@@ -58,6 +58,7 @@ import { TimeCollector } from "../modules/time/collector";
 import {
   categoryForDomain,
   categoryUsage,
+  loadRules,
   pagesForDomain,
   setDomainRule,
   siteTotals,
@@ -573,6 +574,7 @@ export class Services {
 
   timeline(localDate: string): TimelineSegment[] {
     // The time module owns focus_event; the container only delegates.
+    const rules = loadRules(this.db);
     return timelineSegments(this.db, localDate).map((r) => ({
       startedAt: r.startedAt,
       endedAt: r.endedAt,
@@ -580,7 +582,7 @@ export class Services {
       appTitle: r.appTitle,
       seconds: r.seconds,
       category: isBrowserClass(r.appClass)
-        ? categoryForDomain(this.db, guessSite(r.appTitle)?.site ?? "")
+        ? categoryForDomain(this.db, guessSite(r.appTitle)?.site ?? "", rules)
         : "App",
     }));
   }

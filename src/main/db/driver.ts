@@ -19,7 +19,6 @@ export type Row = Record<string, unknown>;
 export interface OpenOptions {
   readonly?: boolean;
   /** Set true when reading a foreign DB that must not be modified (browser history). */
-  immutable?: boolean;
   busyTimeoutMs?: number;
 }
 
@@ -36,7 +35,7 @@ export class Db {
 
   static open(file: string, opts: OpenOptions = {}): Db {
     if (!opts.readonly) mkdirSync(dirname(file), { recursive: true });
-    const uri = opts.immutable ? `file:${file}?immutable=1` : file;
+    const uri = file;
     const raw = new DatabaseSync(uri, { readOnly: opts.readonly ?? false });
     const db = new Db(raw, file);
     db.raw.exec(`PRAGMA busy_timeout = ${opts.busyTimeoutMs ?? 5000};`);

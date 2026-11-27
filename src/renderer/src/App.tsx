@@ -162,8 +162,7 @@ function App() {
     // Tracking can be paused from the tray while this window is hidden, so the
     // health state is updated from the pushed event rather than waiting for the
     // next dashboard poll. Note: this feeds the dashboard's System-health panel,
-    // NOT the F-SHELL-08 status strip — that strip is not implemented (see the
-    // "Still open" section of the review report). The push is the data half.
+    // The F-SHELL-08 status strip reads the same state (see below).
     const offCollector = window.selfos.on("collector-status", (state) => {
       setHealth((prev) =>
         prev

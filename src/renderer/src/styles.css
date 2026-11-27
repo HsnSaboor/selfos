@@ -154,7 +154,6 @@ body {
   color: var(--fg-muted);
 }
 
-.pill.immutable { background: color-mix(in srgb, var(--c-green, #a9b665) 22%, transparent); color: var(--fg); }
 .pill.snapshot { background: color-mix(in srgb, var(--c-yellow, #d8a657) 22%, transparent); color: var(--fg); }
 .pill.unavailable { background: color-mix(in srgb, var(--c-red, #ea6962) 22%, transparent); color: var(--fg); }
 

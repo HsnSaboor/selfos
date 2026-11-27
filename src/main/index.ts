@@ -23,6 +23,7 @@ import { Readable } from "node:stream";
 
 import { app, BrowserWindow, dialog, Menu, nativeImage, protocol, shell, Tray } from "electron";
 import { PRAYER_IDS } from "../shared/api";
+import { isInside } from "../shared/paths";
 import { isSafeExternalUrl } from "./external-url";
 import { watchTheme } from "./integrations/omarchy-theme";
 import { PRAYER_LABELS } from "./integrations/salah/bridge";
@@ -383,10 +384,7 @@ function registerAppProtocol(): void {
     const file = resolve(root, rel);
     // `startsWith(root)` accepts a sibling such as `../renderer-extra`; the
     // notes vault already uses resolve + relative for exactly this reason.
-    const relToRoot = relative(root, file);
-    if (relToRoot === "" || relToRoot.startsWith("..") || relToRoot.startsWith("..")) {
-      return new Response("forbidden", { status: 403 });
-    }
+    if (file !== root && !isInside(root, file)) return new Response("forbidden", { status: 403 });
     if (!existsSync(file)) return new Response("not found", { status: 404 });
     return fileResponse(file, request);
   });

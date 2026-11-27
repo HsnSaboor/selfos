@@ -1,8 +1,8 @@
-import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { tempDir } from "./temp";
+import { DatabaseSync } from "node:sqlite";
 import { Db } from "../../src/main/db/driver";
 import { migrate } from "../../src/main/db/migrate";
+import { tempDir } from "./temp";
 
 /**
  * A fresh migrated database in a temp dir that is removed after the test.

@@ -12,8 +12,8 @@ import {
   validateGoalInput,
 } from "../src/main/modules/goals/model";
 import { GoalsService } from "../src/main/modules/goals/service";
-import { tempDir } from "./helpers/temp"
 import { freshDb } from "./helpers/db";
+import { tempDir } from "./helpers/temp";
 
 function freshDb(): Db {
   const dir = tempDir("selfos-goals-");

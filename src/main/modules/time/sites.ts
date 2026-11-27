@@ -111,7 +111,7 @@ export function unionSeconds(intervals: Interval[]): number {
   return Math.round(totalMs / 1000);
 }
 
-function loadRules(db: Db): Map<string, { category: string; distracting: number; is_media: number }> {
+export function loadRules(db: Db): Map<string, { category: string; distracting: number; is_media: number }> {
   const rows = db.all<{ domain: string; category: string; is_distracting: number; is_media: number }>(
     "SELECT domain, category, is_distracting, is_media FROM domain_rule",
   );
@@ -510,6 +510,6 @@ export function setDomainRule(
 }
 
 /** Category label for a domain, using the same rules the site table uses. */
-export function categoryForDomain(db: Db, domain: string): string {
-  return categoryFor(loadRules(db), domain).category;
+export function categoryForDomain(db: Db, domain: string, rules = loadRules(db)): string {
+  return categoryFor(rules, domain).category;
 }

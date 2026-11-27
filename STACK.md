@@ -158,14 +158,14 @@ If Electron proves unworkable (most likely on memory, risk S1), the migration ta
 - Two development loops:
   - Renderer: Vite HMR — the window stays open and state is preserved.
   - Main/preload: rebuild and restart the app (no in-process reload for main).
-- **Tailwind CSS v4** for layout and spacing, with **CSS custom properties** for all colors (theme-driven, §8).
+- **Hand-written CSS** with `:root` custom properties (no Tailwind), with **CSS custom properties** for all colors (theme-driven, §8).
 
 ### 3.2 Libraries
 
 | Concern | Library | Rationale |
 |---|---|---|
-| Data fetching from IPC | `@tanstack/react-query` | Caching, invalidation, stale-while-revalidate; dashboard must not block on collectors (F-DASH-10) |
-| Virtualized lists | `@tanstack/react-virtual` | Library and annotation lists of thousands of rows (N-PERF-06) |
+| Data fetching from IPC | `@tanstack/react-query` *(target, not installed)* | Caching, invalidation, stale-while-revalidate; dashboard must not block on collectors (F-DASH-10) |
+| Virtualized lists | `@tanstack/react-virtual` *(target, not installed)* | Library and annotation lists of thousands of rows (N-PERF-06) |
 | Charts (as built) | hand-rolled SVG/CSS | No chart library installed; the target was `uPlot` |
 | Rings, heatmaps, timelines | Hand-rolled SVG + `d3-scale` | Exact control over the 24 h band and calendar heatmaps; no heavyweight chart runtime |
 | PDF | `pdfjs-dist` + `react-pdf-highlighter` | Text layer + highlight/annotation model already built on pdf.js (F-READ-07…09) |
@@ -178,7 +178,7 @@ If Electron proves unworkable (most likely on memory, risk S1), the migration ta
 | Lint/format | **Biome 2.6 (Rust)** | One native binary for lint + format, ~100 ms on this repo; replaces ESLint + Prettier |
 | Task runner | **`just` (Rust)** | Recipes in a `justfile`; keeps the project's commands out of a JS task-runner layer |
 | Package manager | **Bun 1.4.2** | Faster installs and native TS execution; `bun.lock` is the lockfile |
-| Tests | `vitest` (run under Bun) + `@testing-library/react` + `happy-dom` | Components and pure logic without a browser |
+| Tests | `vitest` (run under Bun) + *(target only; not installed)* | Components and pure logic without a browser |
 
 **No global state library.** Server state is React Query; UI state is local + a small context.
 
@@ -429,6 +429,8 @@ CREATE TABLE goal (
   start_date   TEXT NOT NULL,
   target_date  TEXT,
   status       TEXT NOT NULL DEFAULT 'active', -- active|completed|abandoned
+  parent_id    INTEGER REFERENCES goal(id), -- 0002
+  close_reason TEXT,                          -- 0002
   source       TEXT,                      -- manual|reading.pages|time.focus|salah.all
   created_at   INTEGER NOT NULL,
   closed_at    INTEGER
@@ -472,6 +474,8 @@ CREATE TABLE day_aggregate (
   switches        INTEGER NOT NULL DEFAULT 0,
   first_activity  INTEGER,
   last_activity   INTEGER,
+  focus_sessions  INTEGER NOT NULL DEFAULT 0,   -- 0003
+  longest_focus_seconds INTEGER NOT NULL DEFAULT 0, -- 0003
   rebuilt_at      INTEGER NOT NULL
 );
 ```
@@ -562,13 +566,13 @@ SP-1 established that Helium keeps a rollback journal (`journal_mode=delete`) op
 |---|---|---|
 | `readOnly: true` | `database is locked` (fails in 0.67 ms, and after 5 s of retries) | never |
 | default open | `database is locked` | never |
-| `file:…?immutable=1` | **works, 1.55 ms**, but ignores post-open writes | **fast path**, only when no journal exists |
+| `file:…?immutable=1` | **works, 1.55 ms**, but ignores post-open writes | **not used**: it can read a torn B-tree if a writer starts after the check |
 | copy then read | works, 3.3 s for 433 MB | **fallback**, on a bounded schedule |
 
 Algorithm:
 
 1. Check for `History-journal` next to the DB.
-2. **No journal** → open `file:…?immutable=1` read-only and ingest directly (fast path).
+2. **Any existing file** → copy DB + sidecars to a bounded snapshot and open the copy read-write so SQLite recovers.
 3. **Journal present (or a live writer possible)** → copy the DB **and its `-journal`/`-wal`/`-shm`** to `$XDG_CACHE_HOME/selfos/hist-snapshot-<profile>.sqlite`, open the copy read-write so SQLite recovers the hot journal, read it, then delete it. The copy is allowed **only** for this consistency purpose and is never retained. An immutable open is not used: it ignores a journal and can read a torn B-tree.
 4. Copying is **never** on a short timer against a 433 MB file. It runs at most every four hours (≈6 times a day), in the worker thread, with a hard-coded 800 MB ceiling (`MAX_SNAPSHOT_BYTES`); an abort is reported on the Sites page, not the health page.
 5. Read only rows above `watermark_us`:
@@ -607,7 +611,7 @@ Every row carries `source` (`history` vs `window-title`) so the UI can show prov
 
 ### 5.4 Salah bridge
 
-- **Read:** invoke `~/.local/bin/salah-ctl status` (JSON) on a 30 s timer and on demand. Validate with hand-written guards; on failure, fall back to local computation.
+- **Read:** invoke `~/.local/bin/salah-ctl status` (JSON) cached for 60 s, refreshed on demand and on demand. Validate with hand-written guards; on failure, fall back to local computation.
 - **Fallback compute:** `adhan` npm package configured as **Karachi (18°/18°), Hanafi Asr** to match the existing config (`~/.config/omarchy/salah.json`). Same method, no drift.
 - **Never** write `/tmp/salah_playing.json` and never start adhan audio (F-SALAH-09).
 - **Optional config bridge:** read `salah.json`; write only if a round-trip diff is empty (i.e. every unknown field is preserved). Otherwise the settings page is read-only and says why (F-SALAH-10).
@@ -615,7 +619,7 @@ Every row carries `source` (`history` vs `window-title`) so the UI can show prov
 
 ### 5.5 Scheduler
 
-- Reminders (habits, prayer logging prompts) run in the main process with a 30 s tick and fire **at most once per slot per day**, tracked in a small table.
+- Reminders (habits, prayer logging prompts) run in the main process with a 30 s tick and fire **at most once per slot per day**, tracked in memory.
 - Reminders/notifications (F-HABIT-11) are **not implemented in v1**: there is no scheduler and no `Notification` call. The mechanism (Electron `Notification`, or `omarchy-notification-send` / `notify-send`, both verified installed) is recorded for when the component is built.
 - No wake-from-suspend timers: the existing `salah-daemon` already owns that; SelfOS must not create competing system timers (F-SALAH-09).
 
@@ -627,7 +631,7 @@ Every row carries `source` (`history` vs `window-title`) so the UI can show prov
 
 - **pdf.js** (`pdfjs-dist`) renders pages to canvas with a separate text layer for selection.
 - **react-pdf-highlighter** provides the highlight/annotation interaction model (text highlights, popovers, scroll-to-highlight) and is built on pdf.js. It is vendored/wrapped rather than used raw so we can add display overrides and our own persistence.
-- The PDF worker runs off the UI thread (`pdfjs-dist/build/pdf.worker.mjs` bundled as an asset); pages render **on demand** with a bounded LRU of rasterized pages (default 12 pages) — F-READ-15, N-PERF-03/05.
+- The PDF worker runs off the UI thread (`pdfjs-dist/build/pdf.worker.mjs` bundled as an asset); pages render **on demand** with a bounded document cache (2 open PDFs, LRU-evicted) — F-READ-15, N-PERF-03/05.
 - PDF scripting is disabled (`isEvalSupported: false`, passed to `getDocument`) — N-SEC-02.
 
 ### 6.2 Display overrides (the "custom styling" requirement)
@@ -664,7 +668,7 @@ Re-anchoring on load, in order:
 
 ### 6.4 Session tracking
 
-- A reading session opens on first page view and closes after 60 s of no interaction or on leaving the reader.
+- A reading session opens on first page view and ends on unmount or when the tab becomes hidden (30 s visibility heartbeat) or on leaving the reader.
 - `active_seconds` counts only time with the reader focused and the window visible.
 - Sessions feed `reading_session`, `day_aggregate.reading_seconds`, and linked habits/goals (F-READ-14, F-HABIT-13, F-GOAL-04).
 
@@ -719,7 +723,7 @@ Re-anchoring on load, in order:
 
 - **Vault discovery:** parse `~/.config/obsidian/obsidian.json` → `vaults[*].path`; the referenced path may not exist (C-8), so validate and fall back to a user-picked folder.
 - **Indexing:** Node `fs.watch` recursive on `**/*.md` (ignores `.obsidian/`, `.trash/`), debounced 500 ms, with a 2 s mtime-poll fallback on Linux where recursive watch is unavailable; incremental re-index of changed files only (F-NOTES-06).
-- **Index storage:** a separate SQLite file (`notes-index.sqlite`) with an FTS5 table `note_fts(title, body, tags, path)` plus a `note` row for metadata (`mtime`, size, frontmatter). Keeping it out of the main DB means a vault re-index never bloats backups or contends with collector writes; it is fully rebuildable. Rebuild command on the health page.
+- **Index storage:** a separate SQLite file (`notes-index.sqlite`) with an FTS5 table `note_fts(path UNINDEXED, title, body, tags)` plus a `note` row for metadata (`mtime`, size, frontmatter). Keeping it out of the main DB means a vault re-index never bloats backups or contends with collector writes; it is fully rebuildable. Rebuild command on the health page.
 - **Frontmatter/tags:** hand-rolled `splitFrontmatter` (`src/shared/frontmatter.ts`); also extract inline `#tags`.
 - **Open in Obsidian:** `obsidian://open?vault=<basename>&file=<urlencoded relative path>`; vault name = folder basename (standard Obsidian behaviour). Optional `&heading=`.
 - **Writes:** only two, both explicit and atomic (write temp → `rename`):
@@ -761,7 +765,7 @@ Re-anchoring on load, in order:
 - **Goal writes are additive.** Closing records `status`, `closed_at`, and
   `close_reason` (migration `0002_goals.sql` adds `parent_id` and
   `close_reason`); nothing is deleted, so history survives (F-GOAL-07).
-- **Dashboard** reads only `day_aggregate`, `prayer_log`, `habit_entry`, `reading_position`, and `goal` — all indexed, all small. The 24 h timeline is built from a bucketed query over `focus_event` for one day, cached by React Query (F-DASH-02, N-PERF-02).
+- **Dashboard** reads `day_aggregate`, `prayer_log`, `habit_entry`, `browser_visit` and the goal tables — all indexed, all small. The 24 h timeline is built from a bucketed query over `focus_event` for one day, cached by React Query (F-DASH-02, N-PERF-02).
 
 ---
 

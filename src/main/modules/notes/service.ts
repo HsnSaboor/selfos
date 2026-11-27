@@ -186,7 +186,7 @@ export class NotesService {
 
   // ── internals ─────────────────────────────────────────────────────────
 
-  #exportFor(bookId: number): { title: string; markdown: string; count: number; contentKey: string } {
+  #exportFor(bookId: number): { title: string; markdown: string; contentKey: string } {
     // ReadingService owns the export formatting; both call the shared builder
     // in shared/highlights.ts, so the two cannot drift.
     const book = this.#db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", bookId);
@@ -200,7 +200,7 @@ export class NotesService {
     // The marker must change whenever any row changes, not just when the
     // count does — otherwise a swapped or edited highlight is never re-exported.
     const contentKey = rows.map((r) => `${r.page}\u0000${r.text}\u0000${r.note ?? ""}`).join("\u0001");
-    return { title: book.title, markdown, count: rows.length, contentKey };
+    return { title: book.title, markdown, contentKey };
   }
 
   #writeNote(rel: string, content: string): void {
