@@ -15,6 +15,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -35,7 +36,7 @@ export interface NoteHit {
   modifiedAt: number;
 }
 
-const IGNORED_DIRS = new Set([".obsidian", ".trash", ".git", "node_modules"]);
+export const IGNORED_DIRS = new Set([".obsidian", ".trash", ".git", "node_modules"]);
 const OBSIDIAN_CONFIG = join(homedir(), ".config/obsidian/obsidian.json");
 
 /**
@@ -161,6 +162,16 @@ export class NotesIndex {
   constructor(indexPath: string) {
     mkdirSync(dirname(indexPath), { recursive: true });
     this.#db = Db.open(indexPath);
+    // A crash between temp write and rename leaves litter in the user's vault.
+    try {
+      for (const name of readdirSync(dirname(indexPath))) {
+        if (!name.endsWith(".selfos-tmp")) continue;
+        const p = join(dirname(indexPath), name);
+        if (Date.now() - statSync(p).mtimeMs > 86_400_000) rmSync(p, { force: true });
+      }
+    } catch {
+      /* best effort */
+    }
     this.#db.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS note (
@@ -370,7 +381,10 @@ export class NotesIndex {
     const abs = resolveInVault(this.#vault.path, relPath);
     if (existsSync(abs)) return { path: relPath, created: false };
     mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, content);
+    // Same atomic temp→rename as append: a crash must not leave a partial stub.
+    const tmp = `${abs}.selfos-tmp`;
+    writeFileSync(tmp, content);
+    renameSync(tmp, abs);
     this.upsertFile(abs, relPath);
     return { path: relPath, created: true };
   }

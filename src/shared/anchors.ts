@@ -214,7 +214,9 @@ export function resolveAnchor(
   currentRotation: number,
 ): ResolveResult {
   // Rotation changed: the stored rects are meaningless on this page shape.
-  if (rotationMatches(anchor, currentRotation)) {
+  // A future anchor version must not trust v1 rects either: fall through to
+  // text search rather than guessing (STACK §6.3 migration hook).
+  if (anchor.anchorVersion === ANCHOR_VERSION && rotationMatches(anchor, currentRotation)) {
     const stillValid = anchor.rects.every(
       (r) => r.x >= -0.01 && r.x <= 1.01 && r.y >= -0.01 && r.y <= 1.01 && r.w >= 0 && r.h >= 0,
     );

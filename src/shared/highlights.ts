@@ -29,7 +29,7 @@ export function buildHighlightsMarkdown(title: string, highlights: readonly Expo
       currentPage = h.page;
     }
     lines.push(`> ${h.text.replace(/\n+/g, " ")}`);
-    if (h.note) lines.push(">", `> **Note:** ${h.note}`);
+    if (h.note) lines.push(">", `> **Note:** ${h.note.replace(/\n+/g, " ")}`);
     lines.push("");
   }
   return lines.join("\n");

@@ -642,7 +642,7 @@ Layered, in this order:
 | Crop | viewport offset + clip | margin crop, header/footer trim |
 | Typography (text layer only) | CSS on the text layer | selection color, search highlight |
 
-Per-book overrides live in `book.settings_json` (a validated `zod` object) with a global default. The override set is exactly the PRD F-READ-04 list.
+Per-book overrides live in `book.settings_json` (validated by the hand-written `parseSettings`) with a global default. The override set is exactly the PRD F-READ-04 list.
 
 > **Why not text reflow:** reflow destroys figures, tables, and equations and needs a multi-column heuristic. The PRD decision is display overrides on the original page; this section implements that.
 
@@ -717,14 +717,14 @@ Re-anchoring on load, in order:
 ## 9. Notes module (Obsidian integration)
 
 - **Vault discovery:** parse `~/.config/obsidian/obsidian.json` → `vaults[*].path`; the referenced path may not exist (C-8), so validate and fall back to a user-picked folder.
-- **Indexing:** `chokidar` watcher on `**/*.md` (ignores `.obsidian/`, `.trash/`), debounced 500 ms; incremental re-index of changed files only (F-NOTES-06).
+- **Indexing:** Node `fs.watch` recursive on `**/*.md` (ignores `.obsidian/`, `.trash/`), debounced 500 ms, with a 2 s mtime-poll fallback on Linux where recursive watch is unavailable; incremental re-index of changed files only (F-NOTES-06).
 - **Index storage:** a separate SQLite file (`notes-index.sqlite`) with an FTS5 table `note_fts(title, body, tags, path)` plus a `note` row for metadata (`mtime`, size, frontmatter). Keeping it out of the main DB means a vault re-index never bloats backups or contends with collector writes; it is fully rebuildable. Rebuild command on the health page.
-- **Frontmatter/tags:** parse YAML frontmatter with `yaml`; also extract inline `#tags`.
+- **Frontmatter/tags:** hand-rolled `splitFrontmatter` (`src/shared/frontmatter.ts`); also extract inline `#tags`.
 - **Open in Obsidian:** `obsidian://open?vault=<basename>&file=<urlencoded relative path>`; vault name = folder basename (standard Obsidian behaviour). Optional `&heading=`.
 - **Writes:** only two, both explicit and atomic (write temp → `rename`):
   1. Highlight export block into a configured folder (F-READ-10).
   2. Daily note stub / quick capture append (F-NOTES-05/07).
-- **Never** rewrite, reformat, or delete existing notes (F-NOTES-09). Writes are logged in a local audit table.
+- **Never** rewrite, reformat, or delete existing notes (F-NOTES-09). Writes are atomic (temp → rename); an audit table is **not implemented in v1**.
 
 ---
 

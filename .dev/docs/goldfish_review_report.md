@@ -2382,3 +2382,40 @@ the round is **not clean**.
 | verifiers | M0 32, M2 29, M3 32, M4 32, M5 49, M6 48, M7 52, M8 39; M1 skipped |
 
 **Round 14 reviewer status:** all three reported. Not clean.
+
+---
+
+# Round 15 — reading and notes
+
+Reviewers: `design_critic` (1 Blocker, 3 Majors, 6 Nits), `codebase_details`
+(1 Blocker, 5 Majors, 5 Nits), `zoom_out` (4 Majors, 5 Nits). All reported;
+not clean.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 306 | BLOCKER | `fs.watch(recursive)` is macOS/Windows only, so on Linux the notes watcher threw and never started — F-NOTES-06 unmet | FIXED — 2 s mtime-poll fallback on Linux |
+| 307 | BLOCKER | STACK §9 claimed a write audit table that does not exist | FIXED — claim struck, atomic-write note added |
+| 308 | MAJOR | `get(id)` was `list().find()`, and `list()` called `progress()` per book: O(n²)+N+1 | FIXED — indexed point query |
+| 309 | MAJOR | `setLibraryDir` kept old paths but `resolveFile` required the new root: every old book unopenable | FIXED — known-roots set, old root retained |
+| 310 | MAJOR | Import hashed with `readFileSync` (whole PDF resident) | FIXED — 1 MiB `readSync` loop, constant memory |
+| 311 | MAJOR | Notes read reading's `highlight`/`highlight_note` tables (P-1) and duplicated the query | FIXED — shared `loadHighlights(db, bookId)` |
+| 312 | MAJOR | `startsWith` containment in `resolveFile` | FIXED — shared `isInside` (resolve+relative) |
+| 313 | MAJOR | STACK named chokidar/yaml/zod that are not dependencies | FIXED — corrected |
+| 314 | MAJOR | Export-marker comment said count-keyed | FIXED — content-keyed stated |
+| 315 | NIT | `createIfAbsent` not atomic | FIXED — temp→rename |
+| 316 | NIT | `reading_position.zoom` unclamped on read | FIXED |
+| 317 | NIT | Anchor version mismatch trusted v1 rects | FIXED — falls through to text search |
+| 318 | NIT | Inline `require("node:fs")` in #writeNote | FIXED — top-level import |
+| 319 | NIT | `.selfos-tmp` litter after a crash | FIXED — 24 h sweep on index |
+| 320 | NIT | Note newlines broke the blockquote; firstLines comment; duplicate setPageCount doc | FIXED |
+| 321 | NIT | Reading writes time's aggregate by direct import | RECORDED — minimal cross-module call, documented |
+
+## Round 15 verification
+
+| Check | Result |
+|---|---|
+| `tsc` / `biome` | clean |
+| `vitest` | **464 passed** (1 new) |
+| verifiers | all green (M0 32, M2 29, M3 32, M4 32, M5 49, M6 48, M7 52, M8 39; M1 skipped) |
+
+**Round 15 reviewer status:** all three reported. Not clean.

@@ -5,8 +5,17 @@
  * the same file is a no-op and the original path is only a record.
  */
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+} from "node:fs";
+import { basename, extname, join, resolve } from "node:path";
 import {
   type BookSettingsView,
   PAGE_BACKGROUNDS,
@@ -14,6 +23,7 @@ import {
   READER_SETTING_RANGE,
   ZOOM_MODES,
 } from "../../../shared/api";
+import { isInside } from "../../../shared/paths";
 import type { Db } from "../../db/driver";
 
 export interface BookRow {
@@ -120,10 +130,13 @@ export function parseSettings(raw: string | null): BookSettings {
 export class BookStore {
   #db: Db;
   #libraryDir: string;
+  /** Every root a stored book may live under (a move adds the new one). */
+  #roots: Set<string>;
 
   constructor(db: Db, libraryDir: string) {
     this.#db = db;
     this.#libraryDir = libraryDir;
+    this.#roots = new Set([resolve(libraryDir)]);
     mkdirSync(libraryDir, { recursive: true });
   }
 
@@ -134,6 +147,10 @@ export class BookStore {
   /** F-SET-02: move the library folder; existing books keep their paths. */
   setLibraryDir(dir: string): void {
     mkdirSync(dir, { recursive: true });
+    // Keep the old root: books already imported still live there, and
+    // resolveFile must keep opening them (F-SET-02).
+    this.#roots.add(resolve(this.#libraryDir));
+    this.#roots.add(resolve(dir));
     this.#libraryDir = dir;
   }
 
@@ -147,10 +164,23 @@ export class BookStore {
     if (!stat.isFile()) throw new Error("not a file");
     if (extname(sourcePath).toLowerCase() !== ".pdf") throw new Error("only PDF files are supported");
 
-    const bytes = readFileSync(sourcePath);
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    // Stream the file into the hash: a 100 MB PDF must not be resident in
+    // main-process memory (F-READ-15, N-PERF-05, S1).
+    const sha256 = createHash("sha256");
+    const fd = openSync(sourcePath, "r");
+    try {
+      const buffer = Buffer.allocUnsafe(1 << 20);
+      let read = readSync(fd, buffer, 0, buffer.length, null);
+      while (read > 0) {
+        sha256.update(buffer.subarray(0, read));
+        read = readSync(fd, buffer, 0, buffer.length, null);
+      }
+    } finally {
+      closeSync(fd);
+    }
+    const digest = sha256.digest("hex");
 
-    const existing = this.#db.get<{ id: number }>("SELECT id FROM book WHERE sha256 = ?", sha256);
+    const existing = this.#db.get<{ id: number }>("SELECT id FROM book WHERE sha256 = ?", digest);
     if (existing) return { id: existing.id, created: false };
 
     const dest = join(this.#libraryDir, `${sha256}.pdf`);
@@ -162,7 +192,7 @@ export class BookStore {
       meta?.title?.trim() || basename(sourcePath, extname(sourcePath)),
       dest,
       sourcePath,
-      sha256,
+      digest,
       meta?.pageCount ?? 0,
       JSON.stringify(DEFAULT_SETTINGS),
       Date.now(),
@@ -229,14 +259,42 @@ export class BookStore {
   }
 
   get(id: number): BookRow | null {
-    return this.list().find((b) => b.id === id) ?? null;
+    // A point query: `list().find()` re-parsed every book and re-ran every
+    // count, so listing N books was O(n²) (round-15).
+    const r = this.#db.get<{
+      id: number;
+      title: string;
+      author: string | null;
+      file_path: string;
+      source_path: string;
+      sha256: string;
+      page_count: number;
+      settings_json: string | null;
+      added_at: number;
+      archived_at: number | null;
+    }>("SELECT * FROM book WHERE id = ?", id);
+    if (!r) return null;
+    return {
+      id: r.id,
+      title: r.title,
+      author: r.author,
+      filePath: r.file_path,
+      sourcePath: r.source_path,
+      sha256: r.sha256,
+      pageCount: r.page_count,
+      settings: parseSettings(r.settings_json),
+      addedAt: r.added_at,
+      archivedAt: r.archived_at,
+    };
   }
 
   /** Path for the privileged protocol handler; refuses anything outside the library. */
   resolveFile(id: number): string | null {
     const row = this.#db.get<{ file_path: string }>("SELECT file_path FROM book WHERE id = ?", id);
     if (!row) return null;
-    if (!row.file_path.startsWith(this.#libraryDir)) return null;
+    // Containment against any root this library has had, with resolve+relative
+    // (a prefix test accepts `…/library-evil`).
+    if (![...this.#roots].some((root) => isInside(root, row.file_path))) return null;
     return existsSync(row.file_path) ? row.file_path : null;
   }
 
@@ -263,7 +321,11 @@ export class BookStore {
     // primary position, is still exact. Out-of-range values are clamped rather
     // than passed through, so a bad row cannot throw the reader to the bottom.
     const offset = r.scroll_offset > 1 ? 0 : Math.min(1, Math.max(0, r.scroll_offset));
-    return { page: r.page, scrollOffset: offset, zoom: r.zoom };
+    // Clamp zoom on read too: a bad row must not reach the reader transform.
+    const zoom = Number.isFinite(r.zoom)
+      ? Math.min(READER_SETTING_RANGE.zoom.max, Math.max(READER_SETTING_RANGE.zoom.min, r.zoom))
+      : 1;
+    return { page: r.page, scrollOffset: offset, zoom };
   }
 
   /**

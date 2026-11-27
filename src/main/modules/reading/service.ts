@@ -72,6 +72,19 @@ function parseAnchor(raw: string, text: string, page: number): HighlightAnchor {
   };
 }
 
+/** The one query behind both the reader's highlight list and the notes export. */
+export function loadHighlights(
+  db: Db,
+  bookId: number,
+): Array<{ page: number; text: string; note: string | null }> {
+  return db.all<{ page: number; text: string; note: string | null }>(
+    `SELECT h.page, h.text, n.body AS note
+       FROM highlight h LEFT JOIN highlight_note n ON n.highlight_id = h.id
+      WHERE h.book_id = ? AND h.deleted_at IS NULL ORDER BY h.page, h.id`,
+    bookId,
+  );
+}
+
 export class ReadingService {
   readonly store: BookStore;
   #db: Db;

@@ -3,14 +3,16 @@
  * (highlight export, daily note capture). STACK §9, F-NOTES-01..10.
  */
 
-import { existsSync, type FSWatcher, statSync, watch } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { existsSync, type FSWatcher, readdirSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { localDateKey } from "../../../shared/dates";
 import { buildHighlightsMarkdown } from "../../../shared/highlights";
 import type { Db } from "../../db/driver";
+import { loadHighlights } from "../reading/service";
 import {
   discoverVaults,
   exportMarker,
+  IGNORED_DIRS,
   type NoteHit,
   NotesIndex,
   resolveInVault,
@@ -29,6 +31,8 @@ export class NotesService {
   #index: NotesIndex;
   #db: Db;
   #watcher: FSWatcher | null = null;
+  #pollTimer: NodeJS.Timeout | null = null;
+  #seen = new Map<string, number>();
   #lastIndexAt: number | null = null;
   #pending = new Set<string>();
   #flushTimer: NodeJS.Timeout | null = null;
@@ -174,6 +178,8 @@ export class NotesService {
 
   close(): void {
     this.#watcher?.close();
+    if (this.#pollTimer) clearInterval(this.#pollTimer);
+    this.#pollTimer = null;
     if (this.#flushTimer) clearTimeout(this.#flushTimer);
     this.#index.close();
   }
@@ -185,12 +191,8 @@ export class NotesService {
     // in shared/highlights.ts, so the two cannot drift.
     const book = this.#db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", bookId);
     if (!book) throw new Error("book not found");
-    const rows = this.#db.all<{ page: number; text: string; note: string | null }>(
-      `SELECT h.page, h.text, n.body AS note
-         FROM highlight h LEFT JOIN highlight_note n ON n.highlight_id = h.id
-        WHERE h.book_id = ? AND h.deleted_at IS NULL ORDER BY h.page, h.id`,
-      bookId,
-    );
+    // Reading owns its tables; notes consumes the shared query (P-1).
+    const rows = loadHighlights(this.#db, bookId);
     const markdown = buildHighlightsMarkdown(
       book.title,
       rows.map((r) => ({ page: r.page, text: r.text, note: r.note })),
@@ -204,11 +206,40 @@ export class NotesService {
   #writeNote(rel: string, content: string): void {
     if (!this.#index.vault) throw new Error("no vault selected");
     const abs = resolveInVault(this.#index.vault.path, rel);
-    const { writeFileSync, renameSync } = require("node:fs") as typeof import("node:fs");
     const tmp = `${abs}.selfos-tmp`;
     writeFileSync(tmp, content);
     renameSync(tmp, abs);
     this.#index.upsertFile(abs, rel);
+  }
+
+  /** Fallback watcher for platforms without recursive fs.watch (Linux). */
+  #pollVault(root: string): void {
+    const walk = (dir: string): void => {
+      let names: string[];
+      try {
+        names = readdirSync(dir);
+      } catch {
+        return;
+      }
+      for (const name of names) {
+        const abs = join(dir, name);
+        try {
+          const stat = statSync(abs);
+          if (stat.isDirectory()) {
+            if (!IGNORED_DIRS.has(name)) walk(abs);
+            continue;
+          }
+          if (!name.endsWith(".md")) continue;
+          if ((this.#seen.get(abs) ?? 0) !== stat.mtimeMs) {
+            this.#seen.set(abs, stat.mtimeMs);
+            this.#index.upsertFile(abs, relative(root, abs).split(sep).join("/"));
+          }
+        } catch {
+          /* vanished mid-walk */
+        }
+      }
+    };
+    walk(root);
   }
 
   /** Debounced watch so external edits appear without a full re-index. */
@@ -236,9 +267,10 @@ export class NotesService {
         }, 500);
       });
     } catch {
-      // Recursive watch is unavailable on some platforms; the manual reindex
-      // button remains available in the health page.
+      // `fs.watch(recursive)` is macOS/Windows only. On Linux fall back to a
+      // 2 s mtime poll so external edits still appear (F-NOTES-06).
       this.#watcher = null;
+      this.#pollTimer = setInterval(() => this.#pollVault(root), 2000);
     }
   }
 }

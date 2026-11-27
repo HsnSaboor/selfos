@@ -145,3 +145,12 @@ describe("round 13", () => {
     db.close();
   });
 });
+
+describe("round 15", () => {
+  it("rejects sibling-prefix paths and accepts real children", async () => {
+    const { isInside } = await import("../src/shared/paths");
+    expect(isInside("/tmp/library", "/tmp/library/a.pdf")).toBe(true);
+    expect(isInside("/tmp/library", "/tmp/library-evil/a.pdf")).toBe(false);
+    expect(isInside("/tmp/library", "/tmp/library")).toBe(false);
+  });
+});
