@@ -1,0 +1,41 @@
+{
+  "name": "selfos",
+  "version": "0.1.0",
+  "description": "SelfOS — local-first personal operating system for the desktop",
+  "main": "out/main/index.cjs",
+  "scripts": {
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
+    "build": "electron-vite build",
+    "start": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src tests",
+    "fmt": "biome format --write src tests",
+    "test": "vitest run",
+    "check": "bun run typecheck && bun run lint && bun run test",
+    "verify:shell": "env -u ELECTRON_RUN_AS_NODE electron spikes/verify-shell.cjs --no-sandbox",
+    "verify:time": "env -u ELECTRON_RUN_AS_NODE electron spikes/verify-time.cjs --no-sandbox",
+    "verify:habits": "env -u ELECTRON_RUN_AS_NODE electron spikes/verify-habits.cjs --no-sandbox"
+  },
+  "keywords": [],
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "45.2.1",
+    "electron-vite": "^6.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "adhan": "^4.4.6",
+    "pdfjs-dist": "5.7.284"
+  },
+  "productName": "SelfOS",
+  "packageManager": "bun@1.4.2"
+}

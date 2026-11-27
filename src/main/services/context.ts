@@ -1,0 +1,699 @@
+/**
+ * Service container. Owns the DB handle and the module services the IPC
+ * handlers call. Kept plain (no DI framework) — there is one of everything.
+ */
+
+import { existsSync, rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { Worker } from "node:worker_threads";
+import { app } from "electron";
+import type {
+  AnalyticsView,
+  AppUsage,
+  BackupStatusView,
+  DaySummary,
+  DomainUsageView,
+  HealthReport,
+  HourBucketView,
+  IngestSummaryView,
+  SystemSettingsView,
+  ThemeTokens,
+  TimelineSegment,
+} from "../../shared/api";
+import { autostartEnabled } from "../autostart";
+import { Db } from "../db/driver";
+import { currentVersion, migrate } from "../db/migrate";
+import type { IngestResult } from "../integrations/browser-history/ingest";
+import {
+  BrowserHistoryIngest,
+  cleanupSnapshots,
+  type ProfileConfig,
+  seedDefaultRules,
+  strategyFor,
+} from "../integrations/browser-history/ingest";
+import type { IngestReply, IngestRequest } from "../integrations/browser-history/ingest-worker";
+import { readTheme } from "../integrations/omarchy-theme";
+import { formatHijri } from "../integrations/salah/compute";
+import { daysToRebuild, summarizeDay } from "../modules/dashboard/summary";
+import { applyPendingRestore, BackupService } from "../modules/data/backup";
+import { GoalsService } from "../modules/goals/service";
+import { HabitsService } from "../modules/habits/service";
+import { NotesService } from "../modules/notes/service";
+import { ReadingService } from "../modules/reading/service";
+import { SalahService } from "../modules/salah/service";
+import { localDateKey } from "../modules/time/aggregate";
+import { analyse, hourlyProfile, topDomains } from "../modules/time/analytics";
+import { TimeCollector } from "../modules/time/collector";
+import {
+  categoryUsage,
+  pagesForDomain,
+  setDomainRule,
+  siteTotals,
+  siteUsage,
+  uncategorizedDomains,
+  watchTime,
+} from "../modules/time/sites";
+
+const HELIUM_ROOT = join(homedir(), ".config/net.imput.helium");
+
+/**
+ * The browser profiles to ingest, in one place.
+ *
+ * This list used to be written twice — once for ingest and once for the health
+ * page — while its comment claimed it was configuration. Two lists that must
+ * agree decide what is read and what is reported, so a third profile could be
+ * ingested and invisible, or reported and never read. The names are still
+ * literals: F-SET-01 settings are a separate surface (see `settings()`).
+ */
+const BROWSER_PROFILES = ["Default", "Profile 2"] as const;
+
+/**
+ * F-SET-06 module → tables, with the day column each is filtered by.
+ *
+ * Notes are absent on purpose: the vault holds the user's own files, and a
+ * "delete data" action must never reach them.
+ */
+const DELETE_MODULES: Record<string, Array<{ table: string; column: string }>> = {
+  time: [
+    { table: "focus_event", column: "local_date" },
+    { table: "day_aggregate", column: "local_date" },
+  ],
+  sites: [{ table: "browser_visit", column: "local_date" }],
+  habits: [{ table: "habit_entry", column: "local_date" }],
+  salah: [
+    { table: "prayer_log", column: "local_date" },
+    { table: "qada_event", column: "local_date" },
+    { table: "fasting_log", column: "local_date" },
+  ],
+  reading: [{ table: "reading_session", column: "local_date" }],
+  goals: [
+    { table: "goal", column: "start_date" },
+    { table: "goal_milestone", column: "due_date" },
+  ],
+};
+
+/**
+ * How long one ingest pass may run before the worker is treated as hung.
+ *
+ * A full pass drains up to `MAX_PAGES_PER_RUN` pages, and the snapshot copy is
+ * seconds on a large file; five minutes is well past any real run. Without a
+ * bound, a worker that never replies would stop ingest for the rest of the
+ * process's life.
+ */
+const INGEST_TIMEOUT_MS = 5 * 60 * 1000;
+
+export type IngestSummary = IngestSummaryView;
+export class Services {
+  readonly db: Db;
+  readonly dbPath: string;
+  readonly userDataDir: string;
+  /** Set when a staged restore was applied on this launch. */
+  readonly restoredFrom: string | null;
+  readonly startedAt = Date.now();
+  readonly collector: TimeCollector;
+  readonly habits: HabitsService;
+  readonly salah: SalahService;
+  readonly reading: ReadingService;
+  readonly notes: NotesService;
+  readonly goals: GoalsService;
+  readonly backup: BackupService;
+  readonly history: BrowserHistoryIngest;
+  #backupTimer: NodeJS.Timeout | null = null;
+  #integrity = "unchecked";
+  #integrityAt: number | null = null;
+  readonly #earlyoom = detectEarlyoomPreference();
+  #ingestTimer: NodeJS.Timeout | null = null;
+  /**
+   * The pass currently running, so a manual `sites.ingest` that arrives while
+   * the timer is mid-run joins it instead of returning stale data.
+   */
+  #ingestRun: Promise<void> | null = null;
+  /** Lazily created; see `ingestInWorker`. */
+  #ingestWorker: Worker | null = null;
+  /** Resolver for the one in-flight worker request, if any. */
+  #ingestPending: ((reply: IngestReply) => void) | null = null;
+  #lastIngest: IngestSummary[] = [];
+  #theme: ThemeTokens;
+
+  constructor(userDataDir: string) {
+    this.userDataDir = userDataDir;
+    this.dbPath = join(userDataDir, "selfos.sqlite");
+    // A staged restore must be applied before the database is opened: with a
+    // connection open, the old WAL is checkpointed back over the restored file
+    // and the restore is silently undone.
+    this.restoredFrom = applyPendingRestore(this.dbPath);
+    this.db = Db.open(this.dbPath);
+    migrate(this.db);
+    this.#theme = readTheme();
+    this.collector = new TimeCollector(this.db, { sessionId: detectSessionId() });
+    this.habits = new HabitsService(this.db);
+    this.salah = new SalahService(this.db);
+    this.reading = new ReadingService(this.db, join(userDataDir, "library"));
+    this.notes = this.openNotes(join(userDataDir, "notes-index.sqlite"));
+    this.goals = new GoalsService(this.db);
+    this.backup = new BackupService(this.db, join(userDataDir, "backups"));
+    this.history = new BrowserHistoryIngest({
+      db: this.db,
+      snapshotDir: join(userDataDir, "snapshots"),
+    });
+    seedDefaultRules(this.db);
+  }
+
+  /**
+   * Open the notes index, rebuilding it once if the file is unreadable.
+   *
+   * The index is derived data (STACK §9): a corrupt or truncated file must not
+   * stop the app from starting, so the file and its sidecars are removed and
+   * the open retried. A second failure is a real error and propagates to the
+   * ready handler, which shows it.
+   */
+  private openNotes(indexPath: string): NotesService {
+    try {
+      return new NotesService(this.db, indexPath);
+    } catch (err) {
+      console.error("[notes] index open failed, rebuilding:", err instanceof Error ? err.message : err);
+      for (const suffix of ["", "-wal", "-shm"]) rmSync(`${indexPath}${suffix}`, { force: true });
+      return new NotesService(this.db, indexPath);
+    }
+  }
+
+  /** Profiles to ingest; one list shared with the health page. */
+  browserProfilesConfig(): ProfileConfig[] {
+    return BROWSER_PROFILES.map((profileDir) => ({
+      browser: "helium",
+      profileDir,
+      historyPath: join(HELIUM_ROOT, profileDir, "History"),
+    }));
+  }
+
+  /**
+   * Ingest on startup, then every four hours. A large snapshot copy is
+   * deliberately not on a short timer (F-TIME-17, STACK §5.3 step 4): an hourly
+   * cadence copied a 454 MB file up to 24 times a day. One overlapping run is
+   * skipped rather than queued, so a slow disk cannot pile up work.
+   */
+  startHistoryIngest(): void {
+    cleanupSnapshots(join(this.userDataDir, "snapshots"));
+    const run = () => {
+      void this.runIngest();
+    };
+    // Defer the first run so startup is not blocked by a 454 MB read.
+    setTimeout(run, 3000);
+    this.#ingestTimer = setInterval(run, 4 * 60 * 60 * 1000);
+  }
+
+  /**
+   * Run one ingest pass in the worker and record the result.
+   *
+   * The work itself is synchronous (`DatabaseSync` + `copyFileSync`) and can
+   * take seconds on a large history file, so it runs off the main thread
+   * (STACK §4.1, §5.3 step 8). Overlapping runs are skipped, not queued.
+   */
+  private runIngest(): Promise<void> {
+    // One pass at a time: a second caller joins the run in flight.
+    if (this.#ingestRun) return this.#ingestRun;
+    this.#ingestRun = this.#doIngest().finally(() => {
+      this.#ingestRun = null;
+    });
+    return this.#ingestRun;
+  }
+
+  async #doIngest(): Promise<void> {
+    try {
+      const results = await this.ingestInWorker();
+      if (!results) return;
+      this.#lastIngest = results.map((r) => ({
+        profileDir: r.profileDir,
+        rowsNew: r.rowsNew,
+        strategy: r.strategy,
+        error: r.error,
+      }));
+      // Site time changed, so today's aggregate is stale.
+      this.collector.rebuild(localDateKey(new Date()));
+    } catch (err) {
+      console.error("[ingest] failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  /**
+   * Post one ingest request to the worker.
+   *
+   * Returns `null` when the worker could not run at all (a missing bundle in a
+   * test or a crash), so the caller records "no new data" rather than throwing
+   * into a timer callback.
+   */
+  private ingestInWorker(): Promise<IngestResult[] | null> {
+    return new Promise((resolve) => {
+      let worker: Worker;
+      try {
+        worker = this.#ensureIngestWorker();
+      } catch (err) {
+        console.error("[ingest] worker unavailable:", err instanceof Error ? err.message : err);
+        resolve(null);
+        return;
+      }
+      // A worker that never answers would leave the run pending forever, so
+      // ingest would never run again — a silent permanent stop. The timeout
+      // kills the worker (so the next run rebuilds it) and resolves as "no
+      // data", which is the same outcome as a crash.
+      const timer = setTimeout(() => {
+        if (!this.#ingestPending) return;
+        console.error("[ingest] worker timed out; restarting it");
+        this.#ingestPending = null;
+        this.#ingestWorker = null;
+        void worker.terminate();
+        resolve(null);
+      }, INGEST_TIMEOUT_MS);
+      this.#ingestPending = (reply) => {
+        clearTimeout(timer);
+        this.#ingestPending = null;
+        if (reply.type === "error") {
+          console.error("[ingest] worker error:", reply.message);
+          resolve(null);
+          return;
+        }
+        resolve(reply.results);
+      };
+      const req: IngestRequest = {
+        type: "ingest",
+        dbPath: this.dbPath,
+        snapshotDir: join(this.userDataDir, "snapshots"),
+        profiles: this.browserProfilesConfig(),
+      };
+      worker.postMessage(req);
+    });
+  }
+
+  /**
+   * The worker, created once and kept for the process lifetime.
+   *
+   * A crash must not wedge ingest forever: the `exit` handler drops the
+   * reference and resolves any in-flight request, so the next run rebuilds it.
+   */
+  #ensureIngestWorker(): Worker {
+    if (this.#ingestWorker) return this.#ingestWorker;
+    // `__dirname` is `out/main` at runtime, and electron-vite emits the worker
+    // next to the main bundle (see the `ingestWorker` input in the config).
+    const workerPath = join(__dirname, "ingest-worker.cjs");
+    const worker = new Worker(workerPath);
+    worker.on("message", (reply: IngestReply) => this.#ingestPending?.(reply));
+    worker.on("error", (err) => {
+      console.error("[ingest] worker failed:", err.message);
+      this.#ingestPending?.({ type: "error", message: err.message });
+    });
+    worker.on("exit", (code) => {
+      if (this.#ingestWorker === worker) this.#ingestWorker = null;
+      if (code !== 0) this.#ingestPending?.({ type: "error", message: `worker exited with ${code}` });
+    });
+    this.#ingestWorker = worker;
+    return worker;
+  }
+
+  /** Await one ingest pass. Used by the `sites.ingest` IPC handler. */
+  async ingestNow(): Promise<IngestSummary[]> {
+    // Joins a run already in flight rather than returning `#lastIngest`, which
+    // is empty on the first pass — a manual "ingest now" during the startup run
+    // reported "no profiles" and then the data appeared on its own.
+    await this.runIngest();
+    return this.#lastIngest;
+  }
+
+  lastIngest(): IngestSummary[] {
+    return this.#lastIngest;
+  }
+
+  sites(localDate: string) {
+    const date = localDate;
+    const sites = siteUsage(this.db, date);
+    const totals = siteTotals(this.db, date);
+    return {
+      localDate: date,
+      sites,
+      totals,
+      categories: categoryUsage(this.db, date, sites, totals.webSeconds),
+      watch: watchTime(this.db, date),
+    };
+  }
+
+  pages(domain: string, localDate: string) {
+    return pagesForDomain(this.db, domain, localDate);
+  }
+
+  uncategorized(limit?: number) {
+    return uncategorizedDomains(this.db, limit ?? 50);
+  }
+
+  categorize(domain: string, category: string, opts: { distracting?: boolean; media?: boolean } = {}) {
+    setDomainRule(this.db, domain, category, opts);
+    return { ok: true as const };
+  }
+
+  /**
+   * Take a backup at startup if today's is missing, then every six hours.
+   * Failure is logged, never fatal: a backup problem must not stop tracking.
+   *
+   * The integrity scan and the first backup used to run synchronously inside
+   * the ready handler (and the scan 5 s later), each blocking every IPC call
+   * for as long as it took on a 41 MB database. Both are deferred behind first
+   * paint; the scan is on demand from the Data page in any case.
+   */
+  startBackups(): void {
+    const run = () => {
+      try {
+        // Stamp only when a file was actually written: the timestamp used to be
+        // written on every tick and every launch, so "last backup" showed the
+        // last attempt.
+        const made = this.backup.runScheduled();
+        if (made) this.#stampBackup();
+      } catch (err) {
+        console.error("[backup] failed:", err instanceof Error ? err.message : err);
+      }
+    };
+    setTimeout(run, 15_000);
+    this.#backupTimer = setInterval(run, 6 * 60 * 60 * 1000);
+  }
+
+  #stampBackup(): void {
+    this.db.run(
+      "INSERT INTO meta(key, value) VALUES ('last_backup_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      String(Date.now()),
+    );
+  }
+
+  /** Record a manual backup as the last backup (F-SET-07's health row). */
+  markBackup(): void {
+    this.#stampBackup();
+  }
+
+  /** The last backup instant, parsed once for both readers. */
+  #lastBackupAt(): number | null {
+    const row = this.db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'last_backup_at'");
+    return row?.value ? Number(row.value) : null;
+  }
+
+  analytics(days = 30): AnalyticsView {
+    return analyse(this.db, days);
+  }
+
+  hourly(localDate?: string): HourBucketView[] {
+    return hourlyProfile(this.db, localDate ?? localDateKey(new Date()));
+  }
+
+  domains(days = 30): DomainUsageView[] {
+    return topDomains(this.db, days);
+  }
+
+  backupStatus(): BackupStatusView {
+    return {
+      directory: this.backup.directory,
+      files: this.backup.list(),
+      lastBackupAt: this.#lastBackupAt(),
+    };
+  }
+
+  startTracking(): void {
+    this.collector.start();
+  }
+
+  stopTracking(): void {
+    this.collector.stop();
+  }
+
+  /** The current theme. Read fresh: the watcher is not the only writer. */
+  theme(): ThemeTokens {
+    return readTheme();
+  }
+
+  refreshTheme(): ThemeTokens {
+    this.#theme = readTheme();
+    return this.#theme;
+  }
+
+  /** Called by the main process so a pause from the tray reaches the renderer. */
+  onTrackingChange: ((state: { running: boolean; paused: boolean }) => void) | null = null;
+
+  setPaused(paused: boolean): { paused: boolean } {
+    this.collector.setPaused(paused);
+    const status = this.collector.status();
+    this.onTrackingChange?.({ running: status.running, paused: status.paused });
+    // Report the achieved state, not the requested one: an automatic pause
+    // (lock/idle) can re-assert itself immediately after a resume.
+    return { paused: status.paused };
+  }
+
+  get paused(): boolean {
+    return this.collector.status().paused;
+  }
+
+  /**
+   * Health snapshot. Deliberately cheap: the dashboard polls this every 5 s.
+   *
+   * `PRAGMA integrity_check` measured 1–2 s on a 41 MB database, and the
+   * earlyoom probe spawns a subprocess — both block the main process, so
+   * neither belongs on a polling path. Integrity is cached from the last
+   * explicit check (startup, or the Data page's "check now"); the earlyoom
+   * answer is computed once, since it cannot change while the app runs.
+   */
+  health(): HealthReport {
+    const size = existsSync(this.dbPath) ? statSync(this.dbPath).size : 0;
+
+    return {
+      dbPath: this.dbPath,
+      dbSizeBytes: size,
+      schemaVersion: currentVersion(this.db),
+      integrity: this.#integrity,
+      lastBackupAt: this.#lastBackupAt(),
+      collector: this.collector.status(),
+      browserProfiles: this.browserProfiles(),
+      earlyoomPreference: this.#earlyoom,
+      autostart: autostartEnabled(),
+      // Set once at construction; without it a staged restore applies silently.
+      restoredFrom: this.restoredFrom,
+    };
+  }
+
+  /** Run the expensive integrity scan on demand. Returns the cached value. */
+  checkIntegrity(): { integrity: string; at: number } {
+    this.#integrity = this.db.integrityCheck();
+    this.#integrityAt = Date.now();
+    return { integrity: this.#integrity, at: this.#integrityAt };
+  }
+
+  integrityAt(): number | null {
+    return this.#integrityAt;
+  }
+
+  private browserProfiles(): HealthReport["browserProfiles"] {
+    return this.browserProfilesConfig().map(({ profileDir, historyPath }) => {
+      const row = this.db.get<{ last_ingest_at: number | null; watermark_us: string }>(
+        "SELECT last_ingest_at, watermark_us FROM browser_profile WHERE profile_dir = ?",
+        profileDir,
+      );
+      return {
+        profileDir,
+        historyPath,
+        exists: existsSync(historyPath),
+        lastIngestAt: row?.last_ingest_at ?? null,
+        watermarkUs: row?.watermark_us ?? null,
+        // Same decision the ingester makes, so the health page cannot claim a
+        // different strategy than the one actually used. A zero-byte journal
+        // does not force a snapshot.
+        strategy: strategyFor(historyPath),
+      };
+    });
+  }
+
+  daySummary(localDate: string): DaySummary {
+    const agg = this.db.get<{
+      screen_seconds: number;
+      focused_seconds: number;
+      media_seconds: number;
+      reading_seconds: number;
+      first_activity: number | null;
+      last_activity: number | null;
+      switches: number;
+    }>("SELECT * FROM day_aggregate WHERE local_date = ?", localDate);
+    const habitStates = this.habits.list(localDate);
+    const prayers = this.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM prayer_log WHERE local_date = ?",
+      localDate,
+    );
+    // Prefer the Hijri date the salah stack already reported, so the header and
+    // the Salah module never disagree by a day (they use different calendars).
+    // When the stack answered without one, say "computed": labelling a locally
+    // computed date "salah-ctl" is the divergence `hijriSource` exists to stop.
+    const salahHijri = this.salah.lastHijri();
+    return summarizeDay({
+      localDate,
+      agg: agg ?? undefined,
+      habitStates,
+      prayersLogged: prayers?.n ?? 0,
+      hijri: salahHijri.value ?? formatHijri(new Date()),
+      hijriSource: salahHijri.value ? salahHijri.source : "computed",
+      watchSeconds: watchTime(this.db, localDate).seconds,
+    });
+  }
+
+  timeline(localDate: string): TimelineSegment[] {
+    const date = localDate;
+    return this.db
+      .all<{ started_at: number; ended_at: number; app_class: string; app_title: string }>(
+        `SELECT started_at, ended_at, app_class, app_title
+           FROM focus_event WHERE local_date = ? ORDER BY started_at`,
+        date,
+      )
+      .map((r) => ({
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        appClass: r.app_class,
+        appTitle: r.app_title ?? "",
+        seconds: Math.max(0, Math.round((r.ended_at - r.started_at) / 1000)),
+      }));
+  }
+
+  topApps(localDate: string): AppUsage[] {
+    const rows = this.db.all<{ app_class: string; ms: number }>(
+      `SELECT app_class, SUM(ended_at - started_at) AS ms
+         FROM focus_event WHERE local_date = ?
+        GROUP BY app_class ORDER BY ms DESC`,
+      localDate,
+    );
+    const total = rows.reduce((a, r) => a + r.ms, 0) || 1;
+    return rows.map((r) => ({
+      appClass: r.app_class,
+      seconds: Math.round(r.ms / 1000),
+      share: r.ms / total,
+    }));
+  }
+
+  rebuildDay(localDate: string): { rebuilt: string } {
+    this.collector.rebuild(localDate);
+    return { rebuilt: localDate };
+  }
+
+  /** F-SET-07: rebuild every derived day, not only the one asked for. */
+  rebuildAll(): { rebuilt: number } {
+    const days = daysToRebuild(this.db);
+    for (const day of days) this.collector.rebuild(day);
+    return { rebuilt: days.length };
+  }
+
+  /** F-SET-02/01: the configurable folders and the excluded-app list. */
+  settings(): SystemSettingsView {
+    return {
+      libraryDir: this.reading.store.libraryDir,
+      vaultDir: this.notes.status().vault?.path ?? null,
+      backupDir: this.backup.directory,
+      // `userData` is chosen by Electron at launch; it is reported, not changed.
+      dataDir: this.userDataDir,
+      excludedApps: this.collector.excludedApps(),
+    };
+  }
+
+  /**
+   * Apply a settings patch. Only fields that can change without a restart are
+   * accepted; an unknown field is ignored rather than silently stored.
+   */
+  setSettings(patch: {
+    libraryDir?: string;
+    backupDir?: string;
+    excludedApps?: string[];
+  }): SystemSettingsView {
+    if (patch.libraryDir !== undefined) this.reading.store.setLibraryDir(patch.libraryDir);
+    if (patch.backupDir !== undefined) this.backup.setDirectory(patch.backupDir);
+    if (patch.excludedApps !== undefined) this.collector.setExcluded(patch.excludedApps);
+    return this.settings();
+  }
+
+  /**
+   * F-SET-06: delete rows for one module inside a date range.
+   *
+   * `confirm` must be exactly `true`: this is the only destructive path in the
+   * app, and the renderer sends the token only after its own confirmation
+   * dialog. Notes are deliberately not a module here — the vault is the user's
+   * files, not app data.
+   */
+  deleteRange(module: string, from: string | null, to: string | null, confirm: unknown): { deleted: number } {
+    if (confirm !== true) throw new Error("confirmation is required");
+    const tables = DELETE_MODULES[module];
+    if (!tables) throw new Error(`unknown module: ${module}`);
+    let deleted = 0;
+    this.db.transaction(() => {
+      for (const { table, column } of tables) {
+        const where: string[] = [];
+        const params: unknown[] = [];
+        if (from) {
+          where.push(`${column} >= ?`);
+          params.push(from);
+        }
+        if (to) {
+          where.push(`${column} <= ?`);
+          params.push(to);
+        }
+        const sql = `DELETE FROM ${table}${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
+        deleted += this.db.run(sql, ...params).changes;
+      }
+    });
+    // Aggregates are derived from the raw rows that were just removed.
+    for (const day of daysToRebuild(this.db)) this.collector.rebuild(day);
+    return { deleted };
+  }
+
+  close(): void {
+    if (this.#backupTimer) clearInterval(this.#backupTimer);
+    if (this.#ingestTimer) clearInterval(this.#ingestTimer);
+    // The worker holds its own connection to the database, so it must be gone
+    // before `db.close()`: a worker still mid-transaction would keep the file
+    // open past the close and could checkpoint a WAL the main process no longer
+    // expects. `terminate` is asynchronous, but it stops the worker from
+    // starting new work immediately.
+    this.#ingestWorker?.terminate();
+    this.#ingestWorker = null;
+    this.#ingestPending = null;
+    this.collector.stop();
+    // A reader left open must not leave a session row that never ends.
+    this.reading.closeAllSessions();
+    this.notes.close();
+    this.db.close();
+  }
+}
+
+export { localDateKey };
+
+/** XDG session id, with a loginctl fallback when the env var is absent. */
+function detectSessionId(): string {
+  if (process.env.XDG_SESSION_ID) return process.env.XDG_SESSION_ID;
+  try {
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    const out = execFileSync("loginctl", ["list-sessions", "--no-legend"], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes(process.env.USER ?? ""));
+    return line?.trim().split(/\s+/)[0] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** SP-4 verified `islamic-umalqura` is available natively. */
+
+/**
+ * earlyoom on this machine prefers killing Electron processes (SP-2).
+ * `systemctl show -p ExecStart` returns the unexpanded `$EARLYOOM_ARGS`
+ * template, so read the running process's actual cmdline instead.
+ */
+function detectEarlyoomPreference(): boolean {
+  try {
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    const pid = execFileSync("pgrep", ["-x", "earlyoom"], { encoding: "utf8" }).trim().split("\n")[0];
+    if (!pid) return false;
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+    return /--prefer[= ]+\S*electron/i.test(cmdline);
+  } catch {
+    return false;
+  }
+}
+
+export function userDataDir(): string {
+  return app.getPath("userData");
+}
