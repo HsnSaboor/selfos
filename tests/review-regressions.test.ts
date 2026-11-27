@@ -240,7 +240,11 @@ describe("notes quick capture refuses a traversal folder", () => {
     const base = tempDir("selfos-qc-");
     const vault = join(base, "Vault");
     mkdirSync(vault, { recursive: true });
-    const svc = new NotesService(db, join(base, "index.sqlite"));
+    const svc = new NotesService(
+      db,
+      join(base, "index.sqlite"),
+      (id) => db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", id)?.title ?? null,
+    );
     svc.selectVault(vault);
     expect(() => svc.quickCapture("hello", "../../etc")).toThrow();
     expect(existsSync(join(base, "etc"))).toBe(false);
@@ -255,7 +259,11 @@ describe("wave 2: notes export identity", () => {
     const base = tempDir("selfos-exp-");
     const vault = join(base, "Vault");
     mkdirSync(vault, { recursive: true });
-    const svc = new NotesService(db, join(base, "index.sqlite"));
+    const svc = new NotesService(
+      db,
+      join(base, "index.sqlite"),
+      (id) => db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", id)?.title ?? null,
+    );
     svc.selectVault(vault);
 
     const mkBook = (title: string, sha: string) =>
@@ -286,7 +294,11 @@ describe("wave 2: notes export identity", () => {
     const base = tempDir("selfos-exp2-");
     const vault = join(base, "Vault");
     mkdirSync(vault, { recursive: true });
-    const svc = new NotesService(db, join(base, "index.sqlite"));
+    const svc = new NotesService(
+      db,
+      join(base, "index.sqlite"),
+      (id) => db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", id)?.title ?? null,
+    );
     svc.selectVault(vault);
 
     const bookId = Number(
@@ -331,13 +343,21 @@ describe("wave 2: notes vault restore", () => {
     mkdirSync(vault, { recursive: true });
     writeFileSync(join(vault, "note.md"), "# hi");
 
-    const first = new NotesService(db, join(base, "index.sqlite"));
+    const first = new NotesService(
+      db,
+      join(base, "index.sqlite"),
+      (id) => db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", id)?.title ?? null,
+    );
     first.selectVault(vault);
     first.close();
 
     // A fresh service (a new app launch) must find the same vault, even though
     // it is not in Obsidian's config.
-    const second = new NotesService(db, join(base, "index.sqlite"));
+    const second = new NotesService(
+      db,
+      join(base, "index.sqlite"),
+      (id) => db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", id)?.title ?? null,
+    );
     expect(second.status().vault?.path).toBe(vault);
     expect(second.list().length).toBe(1);
     second.close();

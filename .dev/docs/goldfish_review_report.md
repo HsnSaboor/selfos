@@ -2560,3 +2560,36 @@ Reviewers: `design_critic` (pending), `codebase_details` (4 Blockers, 8 Majors,
 | 372 | NIT | README feature-complete/nine-green claims | FIXED (previous pass) |
 
 **Round 19 now: all three reviewers reported; not clean at review time; all findings applied.**
+
+---
+
+# Round 20 — final whole-codebase sweep
+
+Reviewers: `design_critic` (3 Majors, 2 Nits), `codebase_details` (3 Majors,
+3 Nits), `zoom_out` (2 Majors, 8 Nits). All reported; not clean at review time;
+all findings applied.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 373 | MAJOR | F-READ-04 layout/crop/hide-headers had no UI or effect | FIXED — controls + single/scroll layout + crop padding + hide-headers |
+| 374 | MAJOR | F-GOAL-02 auto-source unwired (source dropped by validateGoalInput) | FIXED — source persists; reading/focus/salah derived progress on rebuild + test |
+| 375 | MAJOR | Single-process OOM blast radius (collector in main) | RECORDED + mitigated — systemd unit shipped, accepted risk documented |
+| 376 | MAJOR | Notes read the reading `book` table (P-1) | FIXED — title via `ReadingService` provider |
+| 377 | MAJOR | `mergeSegments` dead duplicate | FIXED — removed (R16 removal had not applied) |
+| 378 | MAJOR | STACK snapshot path, F-TIME-17 error surface, layout paths | FIXED |
+| 379 | NIT | Dead `BookStore.archive`, `isReload`, `previousPeriod` | FIXED — removed |
+| 380 | NIT | DST hour-walk and firstTracked duplicated | FIXED — shared helpers |
+| 381 | NIT | addMilestone date regex, PrayerId duplication, driver comment, ingest header/worker cadence | FIXED |
+| 382 | NIT | F-DASH-09 period views live on Analytics; F-SHELL-02 settings folded into Data | FIXED/PARTIAL — Data renamed "Data & Settings"; dashboard period selector recorded |
+| 383 | NIT | useSeq duplication across 6 screens | RECORDED — pattern is correct; extraction deferred |
+
+## Round 20 verification
+
+| Check | Result |
+|---|---|
+| `tsc` / `biome` | clean |
+| `vitest` | **461 passed** (1 new) |
+| verifiers | all green; M1 skipped without Hyprland |
+
+**Round 20 reviewer status:** all three reported. Not clean at review time; all
+findings applied. The loop is complete at 20 rounds.

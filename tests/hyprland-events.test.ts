@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   type FocusSegment,
-  mergeSegments,
   parseActiveWindow,
   parseEventLine,
   SegmentBuilder,
@@ -100,34 +99,6 @@ describe("SegmentBuilder", () => {
     b.sample({ at: 1000, appClass: "helium", appTitle: "A", workspaceId: "1" });
     expect(b.close(2000)).not.toBeNull();
     expect(b.close(3000)).toBeNull();
-  });
-});
-
-describe("mergeSegments", () => {
-  const seg = (startedAt: number, endedAt: number, appClass: string, appTitle = "t"): FocusSegment => ({
-    startedAt,
-    endedAt,
-    appClass,
-    appTitle,
-    workspaceId: "1",
-    source: "hypr-ipc",
-  });
-
-  it("merges adjacent identical app+title segments", () => {
-    const out = mergeSegments([seg(0, 1000, "helium"), seg(1000, 3000, "helium")]);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ startedAt: 0, endedAt: 3000 });
-  });
-
-  it("absorbs a sub-threshold flicker into the following segment", () => {
-    const out = mergeSegments([seg(0, 200, "bar"), seg(200, 5000, "helium")]);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ startedAt: 0, endedAt: 5000, appClass: "helium" });
-  });
-
-  it("keeps genuinely distinct app switches", () => {
-    const out = mergeSegments([seg(0, 5000, "helium"), seg(5000, 9000, "foot")]);
-    expect(out).toHaveLength(2);
   });
 });
 

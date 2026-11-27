@@ -1,0 +1,14 @@
+# Optional systemd user unit for the packaged app (STACK §5.1, F-TIME-11).
+# Install: cp ops/systemd/selfos.service ~/.config/systemd/user/ && systemctl --user enable --now selfos
+[Unit]
+Description=SelfOS
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/selfos --hidden
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

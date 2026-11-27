@@ -188,3 +188,41 @@ describe("round 16", () => {
     expect(readdirSync(dir).some((n) => n.includes(".premigrate-"))).toBe(true);
   });
 });
+
+describe("round 20", () => {
+  it("derives an auto-sourced goal from reading pages", async () => {
+    const { Db } = await import("../src/main/db/driver");
+    const { migrate } = await import("../src/main/db/migrate");
+    const { Services } = await import("../src/main/services/context");
+    const dir = tempDir("selfos-auto-");
+    const db = Db.open(join(dir, "selfos.sqlite"));
+    migrate(db);
+    const svc = new Services(dir);
+    const id = svc.goals.create({
+      title: "Pages",
+      kind: "numeric",
+      startDate: "2026-11-27",
+      targetValue: 100,
+      source: "reading:pages",
+    });
+    db.run(
+      `INSERT INTO book (title, file_path, sha256, page_count, added_at) VALUES ('b','b.pdf','s',1,?)`,
+      Date.now(),
+    );
+    const bookId = Number(db.run("SELECT id FROM book").lastInsertRowid);
+    db.run(
+      `INSERT INTO reading_session (book_id, started_at, ended_at, local_date, pages_turned, active_seconds)
+       VALUES (?, ?, ?, '2026-11-27', 12, 60)`,
+      bookId,
+      Date.now() - 60_000,
+      Date.now(),
+    );
+    svc.rebuildDay("2026-11-27");
+    const rows = db.all<{ value: number; source: string }>(
+      "SELECT value, source FROM goal_progress WHERE goal_id = ?",
+      id,
+    );
+    expect(rows.some((r) => r.source === "reading:pages" && r.value === 12)).toBe(true);
+    db.close();
+  });
+});

@@ -112,6 +112,13 @@ export interface StreakInput {
  * The walk is per-period because a period schedule's unit is the week/month.
  * For day schedules the period is the day, so the same loop serves both.
  */
+function firstTracked(input: StreakInput): string {
+  return input.entries.reduce(
+    (min, e) => (compareDateKeys(e.localDate, min) < 0 ? e.localDate : min),
+    input.today,
+  );
+}
+
 export function computeStreak(input: StreakInput): StreakResult {
   const { habit, versions, today } = input;
   const lookback = input.lookbackDays ?? 400;
@@ -120,14 +127,11 @@ export function computeStreak(input: StreakInput): StreakResult {
   // Days before the habit's first recorded activity are neutral: the habit did
   // not exist yet, so they must not count as failures.
   const hasHistory = input.entries.length > 0;
-  const firstTracked = input.entries.reduce(
-    (min, e) => (compareDateKeys(e.localDate, min) < 0 ? e.localDate : min),
-    today,
-  );
+  const first = firstTracked(input);
 
   // Exactly `lookback` days, inclusive of today.
   const start = addDays(today, -(lookback - 1));
-  const trackedFrom = compareDateKeys(firstTracked, start) > 0 ? firstTracked : start;
+  const trackedFrom = compareDateKeys(first, start) > 0 ? first : start;
 
   /**
    * Period buckets, keyed by the *period* rather than by a single global kind.
@@ -198,7 +202,7 @@ export function computeStreak(input: StreakInput): StreakResult {
       continue;
     }
 
-    if (hasHistory && compareDateKeys(d, firstTracked) < 0) {
+    if (hasHistory && compareDateKeys(d, first) < 0) {
       states.push("neutral");
       continue;
     }
@@ -261,17 +265,14 @@ export function heatmapDays(input: StreakInput, days: number): Array<{ date: str
   // Days before the habit existed are neutral, not failures — the same rule
   // `computeStreak` applies. Without this a habit created today renders 12
   // weeks of alarming red squares.
-  const firstTracked = input.entries.reduce(
-    (min, e) => (compareDateKeys(e.localDate, min) < 0 ? e.localDate : min),
-    today,
-  );
+  const first = firstTracked(input);
   // One clamp, in shared/dates: the renderer supplies this number and an
   // unbounded value allocates an array of that size on the main process.
   const span = dayCount(days, 84);
   const out: Array<{ date: string; state: DayState }> = [];
   for (let i = span - 1; i >= 0; i--) {
     const d = addDays(today, -i);
-    if (compareDateKeys(d, firstTracked) < 0) {
+    if (compareDateKeys(d, first) < 0) {
       out.push({ date: d, state: "neutral" });
       continue;
     }

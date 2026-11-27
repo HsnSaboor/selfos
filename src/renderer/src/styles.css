@@ -1375,3 +1375,7 @@ button.link {
 .status-strip .grow { flex: 1; }
 .prayer-row, .habit-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .mini.done { border-color: var(--accent); color: var(--accent); }
+
+/* F-READ-04: single-page mode fixes the viewport; scroll mode keeps the\n   scrollable column. */
+.reader-body.layout-single .reader-canvas-wrap { overflow: hidden; }
+.reader-body.layout-scroll .reader-canvas-wrap { overflow: auto; }

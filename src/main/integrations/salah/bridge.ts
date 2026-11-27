@@ -9,8 +9,11 @@
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 
-export type PrayerId = "fajr" | "dhuhr" | "asr" | "maghrib" | "isha";
-export const PRAYERS: PrayerId[] = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+import { PRAYER_IDS, type PrayerId } from "../../../shared/api";
+
+export type { PrayerId };
+/** Mutable ordered list for local iteration (the contract tuple is readonly). */
+export const PRAYERS: PrayerId[] = [...PRAYER_IDS];
 export const PRAYER_LABELS: Record<PrayerId, string> = {
   fajr: "Fajr",
   dhuhr: "Dhuhr",

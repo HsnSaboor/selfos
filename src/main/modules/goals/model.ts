@@ -240,5 +240,6 @@ export function validateGoalInput(input: Partial<GoalInput>): GoalInput {
     startDate,
     targetDate,
     parentId: input.parentId ?? null,
+    source: input.source?.trim() || null,
   };
 }

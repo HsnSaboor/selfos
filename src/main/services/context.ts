@@ -186,12 +186,13 @@ export class Services {
    * ready handler, which shows it.
    */
   private openNotes(indexPath: string): NotesService {
+    const bookTitle = (id: number) => this.reading?.store.get(id)?.title ?? null;
     try {
-      return new NotesService(this.db, indexPath);
+      return new NotesService(this.db, indexPath, bookTitle);
     } catch (err) {
       console.error("[notes] index open failed, rebuilding:", err instanceof Error ? err.message : err);
       for (const suffix of ["", "-wal", "-shm"]) rmSync(`${indexPath}${suffix}`, { force: true });
-      return new NotesService(this.db, indexPath);
+      return new NotesService(this.db, indexPath, bookTitle);
     }
   }
 
@@ -592,13 +593,65 @@ export class Services {
   }
   rebuildDay(localDate: string): { rebuilt: string } {
     this.collector.rebuild(localDate);
+    this.#refreshAutoGoals(localDate);
     return { rebuilt: localDate };
+  }
+
+  /**
+   * F-GOAL-02 auto-source: goals whose `source` names a module metric get a
+   * progress row derived from that module's own table on each rebuild.
+   */
+  #refreshAutoGoals(localDate: string): void {
+    const goals = this.db.all<{ id: number; source: string | null }>(
+      "SELECT id, source FROM goal WHERE status = 'active' AND source IS NOT NULL AND source != 'manual'",
+    );
+    for (const g of goals) {
+      let value: number | null = null;
+      if (g.source === "reading:pages") {
+        value =
+          this.db.get<{ n: number | null }>(
+            "SELECT SUM(pages_turned) AS n FROM reading_session WHERE local_date = ?",
+            localDate,
+          )?.n ?? 0;
+      } else if (g.source === "focus:hours") {
+        const s = this.db.get<{ ms: number }>(
+          "SELECT SUM(ended_at - started_at) AS ms FROM focus_event WHERE local_date = ?",
+          localDate,
+        );
+        value = Math.round((s?.ms ?? 0) / 3_600_000);
+      } else if (g.source === "salah:prayers") {
+        value =
+          this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM prayer_log WHERE local_date = ?", localDate)
+            ?.n ?? 0;
+      }
+      if (value === null) continue;
+      // goal_progress has no unique key: replace today's auto row for this
+      // goal/source instead of stacking a new one on every rebuild.
+      const dayStart = new Date(`${localDate}T00:00:00`).getTime();
+      this.db.run(
+        "DELETE FROM goal_progress WHERE goal_id = ? AND source = ? AND at >= ? AND at < ?",
+        g.id,
+        g.source,
+        dayStart,
+        dayStart + 86_400_000,
+      );
+      this.db.run(
+        "INSERT INTO goal_progress (goal_id, at, value, source, note) VALUES (?, ?, ?, ?, 'auto')",
+        g.id,
+        Date.now(),
+        value,
+        g.source,
+      );
+    }
   }
 
   /** F-SET-07: rebuild every derived day, not only the one asked for. */
   rebuildAll(): { rebuilt: number } {
     const days = daysToRebuild(this.db);
-    for (const day of days) this.collector.rebuild(day);
+    for (const day of days) {
+      this.collector.rebuild(day);
+      this.#refreshAutoGoals(day);
+    }
     return { rebuilt: days.length };
   }
 

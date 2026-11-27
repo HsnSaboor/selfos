@@ -156,6 +156,20 @@ export interface HourBucket {
   seconds: number;
 }
 
+/** Walk [start,end) in local-hour slices, DST-safe (round-20). */
+function eachHourSlice(start: number, end: number, visit: (start: number, end: number) => void): void {
+  let s = start;
+  while (s < end) {
+    const d = new Date(s);
+    const hourStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
+    const natural = hourStart + 3_600_000;
+    const sliceEnd = Math.min(end, natural > s ? natural : s + 3_600_000);
+    if (sliceEnd <= s) break;
+    visit(s, sliceEnd);
+    s = sliceEnd;
+  }
+}
+
 /** Seconds of screen time per local hour (flickers included), for one date. */
 export function hourlyProfile(db: Db, localDate: string): HourBucket[] {
   const rows = db.all<{ started_at: number; ended_at: number }>(
@@ -164,23 +178,10 @@ export function hourlyProfile(db: Db, localDate: string): HourBucket[] {
   );
   const buckets = new Array<number>(24).fill(0);
   for (const r of rows) {
-    // Clip a segment that crosses an hour boundary into each hour it touches.
-    let start = r.started_at;
-    const end = r.ended_at;
-    while (start < end) {
-      const d = new Date(start);
-      const hourStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
-      // `hourStart` is ambiguous during a DST fall-back: the repeated local hour
-      // resolves to the *first* occurrence, which can be an hour before `start`.
-      // Falling back to a full hour from `start` keeps the walk moving; using a
-      // tiny step would terminate but crawl 1 ms at a time.
-      const naturalHourEnd = hourStart + 3_600_000;
-      const hourEnd = naturalHourEnd > start ? naturalHourEnd : start + 3_600_000;
-      const sliceEnd = Math.min(end, hourEnd);
-      const hour = d.getHours();
-      buckets[hour] = (buckets[hour] ?? 0) + Math.max(0, sliceEnd - start);
-      start = sliceEnd;
-    }
+    eachHourSlice(r.started_at, r.ended_at, (start, end) => {
+      const hour = new Date(start).getHours();
+      buckets[hour] = (buckets[hour] ?? 0) + Math.max(0, end - start);
+    });
   }
   return buckets.map((ms, hour) => ({ hour, seconds: Math.round(ms / 1000) }));
 }
@@ -244,16 +245,11 @@ export function activityMatrix(db: Db, days = 7, today = localDateKey(new Date()
   );
   const cells = new Map<string, number>();
   for (const r of rows) {
-    let start = r.started_at;
-    while (start < r.ended_at) {
+    eachHourSlice(r.started_at, r.ended_at, (start, end) => {
       const d = new Date(start);
-      const hourStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
-      const natural = hourStart + 3_600_000;
-      const end = Math.min(r.ended_at, natural > start ? natural : start + 3_600_000);
       const key = `${d.getDay()}:${d.getHours()}`;
       cells.set(key, (cells.get(key) ?? 0) + Math.max(0, end - start));
-      start = end;
-    }
+    });
   }
   const out: ActivityCell[] = [];
   for (let weekday = 0; weekday < 7; weekday++) {

@@ -10,7 +10,6 @@ import {
   chromeTimeToMs,
   domainOf,
   isMediaUrl,
-  isReload,
   MEDIA_RULES,
   msToChromeTime,
   seedDefaultRules,
@@ -126,15 +125,6 @@ describe("isMediaUrl", () => {
   it("does not match lookalikes", () => {
     expect(isMediaUrl("https://notyoutube.com/watch?v=1")).toBe(false);
     expect(isMediaUrl("https://youtube.com.evil.example/watch")).toBe(false);
-  });
-});
-
-describe("isReload", () => {
-  it("reads the core transition byte", () => {
-    expect(isReload(8)).toBe(true);
-    // 805306368 is 0x30000000 | 0 — a typed link, not a reload.
-    expect(isReload(805306368)).toBe(false);
-    expect(isReload(0x100 | 8)).toBe(true);
   });
 });
 

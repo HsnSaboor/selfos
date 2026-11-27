@@ -17,8 +17,8 @@ import { DatabaseSync } from "node:sqlite";
 export type Row = Record<string, unknown>;
 
 export interface OpenOptions {
-  readonly?: boolean;
   /** Set true when reading a foreign DB that must not be modified (browser history). */
+  readonly?: boolean;
   busyTimeoutMs?: number;
 }
 

@@ -81,9 +81,6 @@ export function domainOf(url: string): string | null {
 }
 
 /** Chromium's transition mask: the low byte is the core type. */
-export function isReload(transition: number): boolean {
-  return (transition & 0xff) === 8;
-}
 
 export { DEFAULT_RULES, MEDIA_RULES, type MediaRule } from "./catalog";
 

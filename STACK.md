@@ -573,7 +573,7 @@ Algorithm:
 
 1. Check for `History-journal` next to the DB.
 2. **Any existing file** → copy DB + sidecars to a bounded snapshot and open the copy read-write so SQLite recovers.
-3. **Journal present (or a live writer possible)** → copy the DB **and its `-journal`/`-wal`/`-shm`** to `$XDG_CACHE_HOME/selfos/hist-snapshot-<profile>.sqlite`, open the copy read-write so SQLite recovers the hot journal, read it, then delete it. The copy is allowed **only** for this consistency purpose and is never retained. An immutable open is not used: it ignores a journal and can read a torn B-tree.
+3. **Journal present (or a live writer possible)** → copy the DB **and its `-journal`/`-wal`/`-shm`** to `<userData>/snapshots/hist-<sha1>.sqlite`, open the copy read-write so SQLite recovers the hot journal, read it, then delete it. The copy is allowed **only** for this consistency purpose and is never retained. An immutable open is not used: it ignores a journal and can read a torn B-tree.
 4. Copying is **never** on a short timer against a 433 MB file. It runs at most every four hours (≈6 times a day), in the worker thread, with a hard-coded 800 MB ceiling (`MAX_SNAPSHOT_BYTES`); an abort is reported on the Sites page, not the health page.
 5. Read only rows above `watermark_us`:
    ```sql

@@ -6,7 +6,6 @@ import {
   isoWeekday,
   parseWeekdays,
   periodKeyFor,
-  previousPeriod,
   type ScheduleVersion,
   scheduleFor,
   weekStart,
@@ -107,14 +106,6 @@ describe("isDueOn", () => {
     const s = version({ effectiveFrom: "2026-01-01", kind: "times_per_week", timesPerPeriod: 3 });
     expect(isDueOn(s, "2026-11-02")).toBe(false);
     expect(periodKeyFor(s, "2026-11-05")).toBe("2026-11-02");
-  });
-
-  it("steps to the previous period correctly", () => {
-    const weekly = version({ effectiveFrom: "2026-01-01", kind: "times_per_week" });
-    const monthly = version({ effectiveFrom: "2026-01-01", kind: "times_per_month" });
-    expect(previousPeriod(weekly, "2026-11-02")).toBe("2026-10-26");
-    expect(previousPeriod(monthly, "2026-11-01")).toBe("2026-10-01");
-    expect(previousPeriod(monthly, "2026-01-01")).toBe("2025-12-01");
   });
 
   it("describes schedules for the UI", () => {

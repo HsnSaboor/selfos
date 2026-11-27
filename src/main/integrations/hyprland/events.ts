@@ -137,15 +137,15 @@ export class SegmentBuilder {
 
 /**
  * Merge a closed segment into the run being written, absorbing sub-second
- * flickers the way `mergeSegments` does — but streaming, one segment at a time.
+ * flickers the way a whole-stream merge would — but streaming, one segment at a time.
  *
- * Why this exists rather than calling `mergeSegments` in the collector:
- * `mergeSegments` takes the whole array at once, and the collector writes each
+ * Why a streaming merger rather than a whole-array merge:
+ * the collector writes each
  * segment as it closes so a crash loses at most one flush interval (N-REL-01).
  * Buffering the day to merge it at the end would trade a documented correctness
  * bug for a data-loss window.
  *
- * The rule is the same one `mergeSegments` implements, and the one
+ * The rule is the one
  * `spikes/RESULTS.md` records fixing: a segment shorter than `minMs` is absorbed
  * **backward** into the segment that follows it, because a 200 ms blip must not
  * claim the next several seconds of a different app.

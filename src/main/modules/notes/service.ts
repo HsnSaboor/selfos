@@ -37,7 +37,11 @@ export class NotesService {
   #pending = new Set<string>();
   #flushTimer: NodeJS.Timeout | null = null;
 
-  constructor(db: Db, indexPath: string) {
+  constructor(
+    db: Db,
+    indexPath: string,
+    private readonly bookTitle: (id: number) => string | null = () => null,
+  ) {
     this.#db = db;
     this.#index = new NotesIndex(indexPath);
 
@@ -189,18 +193,18 @@ export class NotesService {
   #exportFor(bookId: number): { title: string; markdown: string; contentKey: string } {
     // ReadingService owns the export formatting; both call the shared builder
     // in shared/highlights.ts, so the two cannot drift.
-    const book = this.#db.get<{ title: string }>("SELECT title FROM book WHERE id = ?", bookId);
-    if (!book) throw new Error("book not found");
+    const title = this.bookTitle(bookId);
+    if (title === null) throw new Error("book not found");
     // Reading owns its tables; notes consumes the shared query (P-1).
     const rows = loadHighlights(this.#db, bookId);
     const markdown = buildHighlightsMarkdown(
-      book.title,
+      title,
       rows.map((r) => ({ page: r.page, text: r.text, note: r.note })),
     );
     // The marker must change whenever any row changes, not just when the
     // count does — otherwise a swapped or edited highlight is never re-exported.
     const contentKey = rows.map((r) => `${r.page}\u0000${r.text}\u0000${r.note ?? ""}`).join("\u0001");
-    return { title: book.title, markdown, contentKey };
+    return { title, markdown, contentKey };
   }
 
   #writeNote(rel: string, content: string): void {

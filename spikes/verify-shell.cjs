@@ -42,7 +42,7 @@ app.whenReady().then(async () => {
   // Assert the nav covers every module, rather than pinning a count that has
   // to be edited on every milestone.
   const EXPECTED_NAV = [
-    "Dashboard", "Reading", "Habits", "Time", "Analytics", "Sites", "Salah", "Notes", "Goals", "Data",
+    "Dashboard", "Reading", "Habits", "Time", "Analytics", "Sites", "Salah", "Notes", "Goals", "Data & Settings",
   ];
   step(
     "nav-rendered",

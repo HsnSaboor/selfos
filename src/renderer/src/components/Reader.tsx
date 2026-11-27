@@ -992,6 +992,33 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
             aria-label="Contrast"
             title="Contrast"
           />
+          <select
+            className="input"
+            value={settings.layout}
+            onChange={(e) => updateSettings({ layout: e.target.value as BookSettingsView["layout"] })}
+            aria-label="Page layout"
+          >
+            <option value="scroll">Scroll</option>
+            <option value="single">Single page</option>
+          </select>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={settings.hideHeaders}
+              onChange={(e) => updateSettings({ hideHeaders: e.target.checked })}
+            />
+            hide headers
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={0.2}
+            step={0.01}
+            value={settings.cropMargins}
+            onChange={(e) => updateSettings({ cropMargins: Number(e.target.value) })}
+            aria-label="Crop margins"
+            title="Crop margins"
+          />
           <button type="button" className="mini" onClick={() => setShowAnnotations((v) => !v)}>
             {showAnnotations ? "hide notes" : "show notes"}
           </button>
@@ -1001,9 +1028,18 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
       {status ? <div className="reader-status">{status}</div> : null}
       {error ? <div className="error">Reader error: {error}</div> : null}
 
-      <div className="reader-body">
+      <div className={`reader-body layout-${settings.layout}`}>
         <div className="reader-canvas-wrap" ref={wrapRef}>
-          <div className="reader-page" style={{ background: surfaceColor(settings.pageBackground) }}>
+          <div
+            className={`reader-page${settings.hideHeaders ? " hide-headers" : ""}`}
+            style={{
+              background: surfaceColor(settings.pageBackground),
+              // F-READ-04 margin crop: a percentage of the page, clipped by the
+              // wrapper. 0 is the default and renders exactly as before.
+              padding: settings.cropMargins > 0 ? `${settings.cropMargins * 100}%` : undefined,
+              overflow: settings.cropMargins > 0 ? "hidden" : undefined,
+            }}
+          >
             <canvas ref={canvasRef} style={{ filter: pageFilter(settings) }} />
             <div className="text-layer" ref={layerRef} aria-hidden="true" />
             <div className="highlight-layer" aria-hidden="true">
