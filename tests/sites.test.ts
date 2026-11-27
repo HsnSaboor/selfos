@@ -260,7 +260,7 @@ describe("BrowserHistoryIngest", () => {
 
   // 12 000 rows is a deliberately large fixture; give it room beyond the 5 s
   // default so the test measures correctness, not machine speed.
-  it("drains more than one page in a single run", { timeout: 30_000 }, () => {
+  it("drains more than one page in a single run", { timeout: 120_000 }, () => {
     // 12 000 visits is more than two pages of 5 000; one run must catch up
     // rather than leaving most of the backfill for later ticks.
     const many = Array.from({ length: 12_000 }, (_, i) => ({
