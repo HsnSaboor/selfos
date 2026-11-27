@@ -12,7 +12,6 @@
 # user's real database. It does NOT change the Wayland app_id: on this build the
 # app_id is always `electron` and cannot be changed from inside the process.
 
-export ELECTRON_ENV := "env -u ELECTRON_RUN_AS_NODE"
 default_dir := justfile_directory()
 
 # List available recipes

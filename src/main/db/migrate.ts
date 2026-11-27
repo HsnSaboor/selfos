@@ -41,7 +41,7 @@ export function migrate(db: Db): MigrateResult {
   const pending = loadMigrations().filter((m) => m.version > from);
   const applied: string[] = [];
 
-  if (pending.length > 0) {
+  if (pending.length > 0 && db.filePath !== ":memory:") {
     // N-REL-03: a restore point before the first change, not the next
     // scheduled backup. A failed forward migration is otherwise unrecoverable.
     try {

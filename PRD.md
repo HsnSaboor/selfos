@@ -129,7 +129,7 @@ Legend: **MUST** = v1 blocker · **SHOULD** = v1 target · **MAY** = v1 if time 
 | F-SHELL-02 | A persistent sidebar navigates to Reading, Habits, Time, Salah, Notes, Progress/Goals, Settings. | MUST |
 | F-SHELL-03 | The app has a **tray icon** with: show/hide, "start/stop tracking", "log prayer…", quit. | MUST |
 | F-SHELL-04 | Closing the main window **hides** the app; tracking and reminders continue. Quit is explicit. | MUST |
-| F-SHELL-05 | The app launches on login (systemd user unit) and starts minimized to tray. | SHOULD |
+| F-SHELL-05 | The app launches on login (XDG autostart entry) and starts minimized to tray. | SHOULD |
 | F-SHELL-06 | Keyboard: `Ctrl+1…7` jumps to modules; `Ctrl+K` opens a command palette (search books, notes, actions). | SHOULD |
 | F-SHELL-07 | Window remembers size, position, and maximized state across restarts. | SHOULD |
 | F-SHELL-08 | A **status strip** always shows: tracking state (on/paused), current activity, next prayer countdown, and DB health (last backup). | MUST |
@@ -366,7 +366,7 @@ The stack document owns the physical schema; these are the product-level guarant
 | Browser history (Helium `net.imput.helium/Default/History`, `Profile 2/History`) | Chromium `urls` + `visits` schema | Read-only, in place, incremental watermark |
 | Obsidian vault | Markdown files on disk + `obsidian://` URI | Read-only by default; atomic writes only on explicit export |
 | Omarchy theme (`~/.local/state/omarchy/current/theme/colors.toml`) | TOML color tokens | Watch for theme change; fall back to built-in palette |
-| systemd user units | `salah-daemon.service` pattern for our own units | Units are installed/uninstalled explicitly, not silently |
+| XDG autostart entrys | `salah-daemon.service` pattern for our own units | Units are installed/uninstalled explicitly, not silently |
 
 ---
 

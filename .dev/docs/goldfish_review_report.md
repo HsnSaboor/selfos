@@ -2518,3 +2518,31 @@ All reported; not clean.
 | verifiers | all green; M1 skipped |
 
 **Round 18 reviewer status:** all three reported. Not clean.
+
+---
+
+# Round 19 — release, packaging, ops and PRD completeness
+
+Reviewers: `design_critic` (pending), `codebase_details` (4 Blockers, 8 Majors,
+3 Nits), `zoom_out` (2 Majors, 2 Nits). Reported; not clean.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 358 | BLOCKER | README claimed feature-complete M0–M8 while STACK lists open MUSTs | FIXED — honest subset + open list |
+| 359 | BLOCKER | STACK claimed electron-builder packaging that does not exist | FIXED — marked planned/absent |
+| 360 | BLOCKER | "nine runs green" contradicted the skip rule | FIXED — eight green + M1 skipped |
+| 361 | BLOCKER | M7 "30-day trial verified" — no trial exists | FIXED — marked open |
+| 362 | MAJOR | Layout/ops paths, collector command, Playwright, pin, systemd-vs-XDG | FIXED |
+| 363 | MAJOR | Test fixtures untracked, so a clean clone cannot verify | FIXED — fixtures tracked |
+| 364 | MAJOR | package.json scripts bypassed the memory guard | FIXED — delegate to just |
+| 365 | NIT | README env claim, M5 real-vault caveat, stray `:memory:` artifact, dead ELECTRON_ENV | FIXED |
+
+## Round 19 verification
+
+| Check | Result |
+|---|---|
+| `tsc` / `biome` | clean |
+| `vitest` | **465 passed** |
+| verifiers | all green; M1 skipped |
+
+**Round 19 reviewer status:** codebase_details + zoom_out reported; design_critic pending. Not clean.

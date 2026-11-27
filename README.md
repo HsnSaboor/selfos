@@ -16,16 +16,20 @@ dashboard.
 - **M3 (salah)** — complete and verified (29/29 + 86 unit tests).
 - **M4 (reading)** — complete and verified (27/27).
 - **M5 (notes)** — complete and verified (49/49): Obsidian vault indexing, FTS5
-  search, preview, quick capture, idempotent highlight export.
+  search, preview, quick capture, idempotent highlight export (verified against a
+  disposable vault; the real vault is not present on this machine).
 - **M6 (goals)** — complete and verified (48/48): numeric, milestone, and quota
   goals, pace projection, nesting roll-up, close/reopen.
-- **M7 (polish)** — complete and verified (51/51): analytics, backups, JSON/CSV
-  export, Ctrl+K command palette, accessibility pass.
+- **M7 (polish)** — implemented and verified (52/52): analytics, backups, JSON/CSV
+  export, Ctrl+K command palette, accessibility pass. The PRD's 30-day daily-use
+  trial is still open.
 - **M8 (sites)** — complete and verified (39/39): browser-history ingest,
   per-site and per-page time, watch time, categories, provenance.
 
-**465 unit tests**, all nine end-to-end runs green (M1 is skipped without a
-Hyprland socket). The app is feature-complete against the PRD's M0–M8 release plan.
+**465 unit tests**; eight end-to-end runs green and M1 skipped without a Hyprland
+socket (a skipped run is not counted as green). Feature-complete for the shipped
+subset; open: F-HABIT-11/13, F-SALAH-07, F-TIME-11/12/15, F-DASH-09, a separate
+collector process, and the notes write audit.
 
 ## Stack
 

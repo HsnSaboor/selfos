@@ -1,8 +1,6 @@
 node_modules/
 spikes/out/
 spikes/pdfjs/
-spikes/fixtures/*.mp4
-spikes/fixtures/*.pdf
 *.log
 out/
 *.sqlite

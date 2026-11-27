@@ -24,7 +24,7 @@
 | 9 | Notes | **Obsidian vault, read-only + explicit writes** | F-NOTES-01…10 |
 | 10 | Salah | **Read the existing `salah-ctl` status**, log outcomes locally | F-SALAH-01…12 |
 | 11 | Theming | **Omarchy `colors.toml` → CSS variables** | F-SET-08, N-UX-03 |
-| 12 | Packaging | **electron-builder** (AppImage + deb), systemd user unit, tray | F-SHELL-03…05 |
+| 12 | Packaging | **electron-builder** (AppImage + deb), XDG autostart entry, tray | F-SHELL-03…05 |
 
 **Decisions deliberately *not* taken:** no Tauri (no Chromium on Linux), no Electrobun (see §2.1), no server, no ORM, no state-sync layer, no cloud, no AI. Each rejection is recorded in §2.7 so the reasoning survives.
 
@@ -76,7 +76,7 @@ The decision is driven by **one requirement**: the reader must render PDFs in a 
 
 - Pin the **exact** Electron version in `package.json` (`"electron": "45.2.1"`, no caret). Electron supports only the latest three majors; an 8-week cadence means a deliberate upgrade every ~6 months.
 - Upgrade procedure: read the breaking-changes page for each intervening major, run the app's smoke checklist (§12.5), then bump.
-- Pin `electron-builder` exactly as well; packaging behaviour changes between minors.
+- When packaging is added, pin `electron-builder` exactly; packaging behaviour changes between minors.
 
 ### 2.3 Process model
 
@@ -821,7 +821,7 @@ Every handler validates its input with hand-written guards and returns a discrim
 | Queries | `vitest` + in-memory SQLite | migrations, idempotent ingest, aggregate rebuild |
 | Integrations | `vitest` + recorded fixtures | Hyprland event stream replay, history DB fixture, salah status JSON |
 | UI | logic-level only | DOM-level views are verified by the Electron verifiers, not unit tests |
-| End-to-end | Playwright (`_electron`) | launch, tray actions, open a PDF, log a prayer |
+| End-to-end | `spikes/verify-*.cjs` via `just verify-*` | launch, tray actions, open a PDF, log a prayer |
 | Manual checklist | §12.5 | autostart, suspend/resume, theme switch, Wayland drag |
 
 **Non-negotiable tests:** Chromium timestamp conversion with `bigint`; ingest idempotency (run twice → same row count); streak across a schedule change; highlight re-anchor after zoom change; collector gap on socket drop; protocol path-traversal rejection.

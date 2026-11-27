@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src tests",
     "fmt": "biome format --write src tests",
-    "test": "vitest run",
-    "check": "bun run typecheck && bun run lint && bun run test"
+    "test": "just test",
+    "check": "just check"
   },
   "keywords": [],
   "type": "module",
