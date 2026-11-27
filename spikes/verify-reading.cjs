@@ -4,14 +4,7 @@ const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const OUT = path.join(__dirname, "out");
-fs.mkdirSync(OUT, { recursive: true });
-const report = { spike: "M4-reading", steps: [] };
-const step = (name, ok, detail) => {
-  report.steps.push({ name, ok, detail });
-  console.log(`STEP ${ok ? "PASS" : "FAIL"} ${name}${detail ? " :: " + detail : ""}`);
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const { OUT, report, step, sleep, finish } = require(require("node:path").join(__dirname, "verify-harness.cjs")).createHarness("M4-reading", "m4-reading.json", "M4");
 
 /** Poll the renderer until `expr` is truthy, or give up after `timeout` ms. */
 async function waitFor(win, expr, timeout = 15000) {
@@ -297,7 +290,3 @@ app.whenReady().then(async () => {
   finish();
 });
 
-function finish() {
-  console.log(`M4_EXIT failed=${report.failed ?? 0}`);
-  process.exit(report.failed ? 1 : 0);
-}

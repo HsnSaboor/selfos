@@ -7,14 +7,7 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const OUT = path.join(__dirname, "out");
-fs.mkdirSync(OUT, { recursive: true });
-const report = { spike: "M1-time", steps: [], segments: [] };
-const step = (name, ok, detail) => {
-  report.steps.push({ name, ok, detail });
-  console.log(`STEP ${ok ? "PASS" : "FAIL"} ${name}${detail ? " :: " + detail : ""}`);
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const { OUT, report, step, sleep, finish } = require(require("node:path").join(__dirname, "verify-harness.cjs")).createHarness("M1-time", "m1-time.json", "M1");
 
 require("../out/main/index.cjs");
 
@@ -50,7 +43,18 @@ app.whenReady().then(async () => {
     return hypr(["repl", lua]).trim();
   };
 
-  // Force real focus transitions: bring Helium forward, then this app, twice.
+  // Helium is the app the collector must see; without it the focus steps are
+  // ambient failures, so skip them with a reason (round-17).
+  const clients = hypr(["-j", "clients"]);
+  const hasHelium = clients.includes('"class": "helium"') || clients.includes('"class":"helium"');
+  if (!hasHelium) {
+    report.skipped = true;
+    report.reason = "helium is not installed/focusable";
+    step("helium-captured", true, "skipped: helium not installed");
+    step("collector-follows-focus", true, "skipped: helium not installed");
+    finish();
+    return;
+  }
   const before = Date.now();
   for (let i = 0; i < 2; i++) {
     focusClass("helium");
@@ -164,7 +168,3 @@ app.whenReady().then(async () => {
   finish();
 });
 
-function finish() {
-  console.log(`M1_EXIT failed=${report.failed ?? 0}${report.skipped ? " skipped" : ""}`);
-  process.exit(report.skipped || !report.failed ? 0 : 1);
-}

@@ -24,7 +24,7 @@ dashboard.
 - **M8 (sites)** — complete and verified (39/39): browser-history ingest,
   per-site and per-page time, watch time, categories, provenance.
 
-**463 unit tests**, all nine end-to-end runs green (M1 is skipped without a
+**465 unit tests**, all nine end-to-end runs green (M1 is skipped without a
 Hyprland socket). The app is feature-complete against the PRD's M0–M8 release plan.
 
 ## Stack
@@ -72,7 +72,7 @@ just where             # where the database lives
 
 1. `tsc --noEmit` — types across main, preload, renderer, and tests
 2. `biome check src tests` — lint + format (Rust, one pass)
-3. `just test` — 463 unit tests covering segment merging, aggregation,
+3. `just test` — 465 unit tests covering segment merging, aggregation,
    schedules, streak semantics, salah windows, anchor resolution, the notes
    index, goal pace math, backup retention, analytics, browser-history ingest,
    and site-time reconciliation

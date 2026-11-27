@@ -1,17 +1,11 @@
 // M0 verification: launch the built app, exercise IPC, screenshot, exit.
 // This is the app entrypoint for the verification run; it loads the real
-// built main process from out/main/index.js and then asserts against it.
+// built main process from out/main/index.cjs and then asserts against it.
 const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const OUT = path.join(__dirname, "out");
-fs.mkdirSync(OUT, { recursive: true });
-const report = { spike: "M0-shell", steps: [] };
-const step = (name, ok, detail) => {
-  report.steps.push({ name, ok, detail });
-  console.log(`STEP ${ok ? "PASS" : "FAIL"} ${name}${detail ? " :: " + detail : ""}`);
-};
+const { OUT, report, step, sleep, finish } = require(require("node:path").join(__dirname, "verify-harness.cjs")).createHarness("M0-shell", "m0-shell.json", "M0");
 
 // Boot the real app.
 require("../out/main/index.cjs");
@@ -45,8 +39,6 @@ app.whenReady().then(async () => {
   })`);
   step("react-mounted", dom.rootChildren > 0, `root children: ${dom.rootChildren}`);
   step("preload-bridge", dom.hasBridge);
-  // The nav grows with the product; assert it covers every module rather than
-  // pinning a count that has to be edited on every milestone.
   // Assert the nav covers every module, rather than pinning a count that has
   // to be edited on every milestone.
   const EXPECTED_NAV = [
@@ -88,8 +80,9 @@ app.whenReady().then(async () => {
   step("ipc-theme", ipc.themeOk, `${ipc.themeName} accent=${ipc.accent}`);
   step("ipc-dashboard", ipc.dayOk, `hijri: ${ipc.hijri}`);
   step("ipc-validation", ipc.badOk === false, ipc.badError ?? "");
-  step("earlyoom-detected", ipc.earlyoom === true);
-  step("browser-profiles", Array.isArray(ipc.profiles) && ipc.profiles.length > 0, (ipc.profiles ?? []).join(", "));
+  // Host state, not app behaviour: report the shape and note the host value.
+  step("earlyoom-shape", typeof ipc.earlyoom === "boolean", `host earlyoom=${ipc.earlyoom}`);
+  step("browser-profiles-shape", Array.isArray(ipc.profiles), (ipc.profiles ?? []).length + " configured");
   report.ipc = ipc;
 
   /**
@@ -277,17 +270,6 @@ app.whenReady().then(async () => {
   const dbFile = path.join(app.getPath("userData"), "selfos.sqlite");
   step("db-created", fs.existsSync(dbFile), dbFile);
 
-  report.passed = report.steps.filter((s) => s.ok).length;
-  report.failed = report.steps.filter((s) => !s.ok).length;
-  fs.writeFileSync(path.join(OUT, "m0-shell.json"), JSON.stringify(report, null, 2));
-  console.log("M0_RESULT " + JSON.stringify({ passed: report.passed, failed: report.failed }));
   finish();
 });
 
-function finish() {
-  // app.exit() can be swallowed while a Tray holds the event loop, so force a
-  // process exit with an explicit code. The result file is already written.
-  const failed = report.failed ?? 0;
-  console.log(`M0_EXIT failed=${failed}`);
-  process.exit(failed === 0 ? 0 : 1);
-}

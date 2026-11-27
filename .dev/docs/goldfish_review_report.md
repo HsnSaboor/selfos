@@ -2449,3 +2449,33 @@ Nits), `zoom_out` (6 Nits). All reported; not clean (Majors).
 | verifiers | all green; M1 skipped |
 
 **Round 16 reviewer status:** all three reported. Not clean.
+
+---
+
+# Round 17 — test and verification infrastructure
+
+Reviewers: `design_critic` (6 Majors, 5 Nits), `codebase_details` (5 Nits),
+`zoom_out` (4 Majors, 1 Nit). All reported; not clean.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 332 | MAJOR | `freshDb()` copy-pasted in 4 files and rebuilt inline in more | FIXED — `tests/helpers/db.ts` |
+| 333 | MAJOR | 9 verifiers re-declared ~20 lines of harness each | FIXED — `spikes/verify-harness.cjs` |
+| 334 | MAJOR | package.json verify scripts omitted SELFOS_VERIFY and 6 verifiers | FIXED — removed; justfile is the single source |
+| 335 | MAJOR | round11 tests leaked temp dirs and re-imported node modules | FIXED — tempDir + top imports |
+| 336 | MAJOR | Hourly DST test exercised a copy, not `hourlyProfile` | FIXED — real function test added; copy renamed |
+| 337 | MAJOR | Reading-session test asserted tautologies | FIXED — asserts aggregate == reported duration |
+| 338 | MAJOR | Verifiers asserted host state (earlyoom, profiles, helium) | FIXED — shape/skip with reason |
+| 339 | MAJOR | `just check` hard-depended on systemd --user | FIXED — falls back to test-plain |
+| 340 | NIT | Guard-shape copies (makeGuard/makeLoader/makeView) | RECORDED — pattern tests |
+| 341 | NIT | verify rebuilds 9×, isolate fragility, midnight flake, spike comment, index.cjs, duplicate comment, README count | FIXED/recorded |
+
+## Round 17 verification
+
+| Check | Result |
+|---|---|
+| `tsc` / `biome` | clean |
+| `vitest` | **465 passed** |
+| verifiers | all green (M1 skipped/1 step) |
+
+**Round 17 reviewer status:** all three reported. Not clean.

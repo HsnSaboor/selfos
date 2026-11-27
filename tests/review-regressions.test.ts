@@ -11,7 +11,8 @@ import { migrate } from "../src/main/db/migrate";
 import { heatmapDays } from "../src/main/modules/habits/streak";
 import { NotesIndex, resolveInVault, safeFolder } from "../src/main/modules/notes/index";
 import { BookStore } from "../src/main/modules/reading/library";
-import { tempDir } from "./helpers/temp";
+import { tempDir } from "./helpers/temp"
+import { freshDb } from "./helpers/db";
 
 function freshDb(): Db {
   const dir = tempDir("selfos-regress-");
@@ -205,7 +206,7 @@ describe("qada debt follows status transitions", () => {
 });
 
 describe("reading session rebuilds the day aggregate", () => {
-  it("records reading time even when tracking is paused", async () => {
+  it("writes the session duration into the day aggregate", async () => {
     const { ReadingService } = await import("../src/main/modules/reading/service");
     const db = freshDb();
     const dir = tempDir("selfos-library-");
@@ -225,7 +226,9 @@ describe("reading session rebuilds the day aggregate", () => {
     const agg = db.get<{ reading_seconds: number }>(
       "SELECT reading_seconds FROM day_aggregate WHERE local_date = date('now', 'localtime')",
     );
-    expect(agg?.reading_seconds ?? -1).toBeGreaterThanOrEqual(0);
+    // The aggregate is rebuilt from the session row, so it must equal the
+    // duration the service reported — not merely be non-negative.
+    expect(agg?.reading_seconds).toBe(ended.activeSeconds);
     expect(ended.activeSeconds).toBeGreaterThanOrEqual(0);
   });
 });
@@ -370,7 +373,7 @@ describe("wave 2: count habits at zero", () => {
 });
 
 describe("wave 3: time and site accounting", () => {
-  it("hourlyProfile always advances, even when hourStart is behind start", () => {
+  it("the hour-walk rule advances, even when hourStart is behind start", () => {
     // Regression: the walk used `Math.min(end, hourStart + 1h)`. During a DST
     // fall-back the repeated local hour resolves to its *first* occurrence, so
     // hourStart can be an hour before `start` and the loop never advanced —

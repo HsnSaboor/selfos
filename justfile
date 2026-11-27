@@ -80,7 +80,8 @@ test-watch:
     systemd-run --user --scope -q -p MemoryMax=1G -p MemorySwapMax=0 bunx vitest
 
 # Everything that must pass before a commit
-check: typecheck lint test
+check: typecheck lint
+    @if systemctl --user show-environment >/dev/null 2>&1; then just test; else just test-plain; fi
     @echo "all gates passed"
 
 # ── end-to-end verification ───────────────────────────────────────────────

@@ -4,14 +4,7 @@ const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const OUT = path.join(__dirname, "out");
-fs.mkdirSync(OUT, { recursive: true });
-const report = { spike: "M7-polish", steps: [] };
-const step = (name, ok, detail) => {
-  report.steps.push({ name, ok, detail });
-  console.log(`STEP ${ok ? "PASS" : "FAIL"} ${name}${detail ? " :: " + detail : ""}`);
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const { OUT, report, step, sleep, finish } = require(require("node:path").join(__dirname, "verify-harness.cjs")).createHarness("M7-polish", "m7-polish.json", "M7");
 
 require("../out/main/index.cjs");
 
@@ -276,7 +269,3 @@ app.whenReady().then(async () => {
   finish();
 });
 
-function finish() {
-  console.log(`M7_EXIT failed=${report.failed ?? 0}`);
-  process.exit(report.failed ? 1 : 0);
-}

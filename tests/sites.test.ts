@@ -27,7 +27,8 @@ import {
   unionSeconds,
   watchTime,
 } from "../src/main/modules/time/sites";
-import { tempDir } from "./helpers/temp";
+import { tempDir } from "./helpers/temp"
+import { freshDb } from "./helpers/db";
 
 function freshDb(): Db {
   const dir = tempDir("selfos-sites-");

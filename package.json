@@ -1,7 +1,7 @@
 {
   "name": "selfos",
   "version": "0.1.0",
-  "description": "SelfOS — local-first personal operating system for the desktop",
+  "description": "SelfOS \u2014 local-first personal operating system for the desktop",
   "main": "out/main/index.cjs",
   "scripts": {
     "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
@@ -11,10 +11,7 @@
     "lint": "biome check src tests",
     "fmt": "biome format --write src tests",
     "test": "vitest run",
-    "check": "bun run typecheck && bun run lint && bun run test",
-    "verify:shell": "env -u ELECTRON_RUN_AS_NODE electron spikes/verify-shell.cjs --no-sandbox",
-    "verify:time": "env -u ELECTRON_RUN_AS_NODE electron spikes/verify-time.cjs --no-sandbox",
-    "verify:habits": "env -u ELECTRON_RUN_AS_NODE electron spikes/verify-habits.cjs --no-sandbox"
+    "check": "bun run typecheck && bun run lint && bun run test"
   },
   "keywords": [],
   "type": "module",

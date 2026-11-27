@@ -1,7 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { tempDir } from "./helpers/temp";
+import { freshDb } from "./helpers/db";
+import { Db } from "../src/main/db/driver";
+import { migrate } from "../src/main/db/migrate";
 import { autostartEnabled, setAutostart } from "../src/main/autostart";
 import { contrastPairs, contrastRatio, FALLBACK_THEME } from "../src/main/integrations/omarchy-theme";
 import { summarizeDay } from "../src/main/modules/dashboard/summary";
@@ -94,19 +97,15 @@ describe("fallback theme contrast (WCAG AA)", () => {
 
 describe("autostart entry", () => {
   it("writes a --hidden desktop entry and removes it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "selfos-autostart-"));
+    const dir = tempDir("selfos-autostart-");
     const file = join(dir, "selfos.desktop");
-    try {
-      expect(autostartEnabled(file)).toBe(false);
-      expect(setAutostart(true, file)).toBe(true);
-      const text = readFileSync(file, "utf8");
-      expect(text).toContain("X-GNOME-Autostart-enabled=true");
-      expect(text).toContain("--hidden");
-      expect(setAutostart(false, file)).toBe(false);
-      expect(autostartEnabled(file)).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(autostartEnabled(file)).toBe(false);
+    expect(setAutostart(true, file)).toBe(true);
+    const text = readFileSync(file, "utf8");
+    expect(text).toContain("X-GNOME-Autostart-enabled=true");
+    expect(text).toContain("--hidden");
+    expect(setAutostart(false, file)).toBe(false);
+    expect(autostartEnabled(file)).toBe(false);
   });
 });
 
@@ -177,13 +176,12 @@ describe("round 16", () => {
   });
 
   it("takes a pre-migration snapshot before applying pending migrations", async () => {
+    const { readdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dir = tempDir("selfos-mig-");
+    const file = join(dir, "selfos.sqlite");
     const { Db } = await import("../src/main/db/driver");
     const { migrate } = await import("../src/main/db/migrate");
-    const { mkdtempSync, readdirSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const dir = mkdtempSync(join(tmpdir(), "selfos-mig-"));
-    const file = join(dir, "selfos.sqlite");
     const db = Db.open(file);
     migrate(db);
     db.close();
