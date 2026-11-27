@@ -1,6 +1,9 @@
 # Packaging (STACK §12, decision #12). Run `just dist`.
 appId: dev.selfos.app
 productName: SelfOS
+maintainer: "HsnSaboor <HsnSaboor@users.noreply.github.com>"
+description: "Local-first personal operating system"
+author: "HsnSaboor <HsnSaboor@users.noreply.github.com>"
 directories:
   output: release
   buildResources: build
