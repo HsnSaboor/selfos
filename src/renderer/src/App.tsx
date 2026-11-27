@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type AppUsage,
+  type BookView,
   type DaySummary,
+  type HabitView,
   type HealthReport,
   MODULE_IDS,
   type ModuleId,
@@ -77,6 +79,13 @@ function App() {
   const [segments, setSegments] = useState<TimelineSegment[]>([]);
   const [prayers, setPrayers] = useState<PrayerMarker[]>([]);
   const [apps, setApps] = useState<AppUsage[]>([]);
+  const [habits, setHabits] = useState<HabitView[]>([]);
+  const [books, setBooks] = useState<BookView[]>([]);
+  /** F-SET-08 manual override, persisted locally (auto follows Omarchy). */
+  const [themeOverride, setThemeOverride] = useState<"auto" | "light" | "dark">(() => {
+    const saved = localStorage.getItem("selfos.theme.override");
+    return saved === "light" || saved === "dark" ? saved : "auto";
+  });
   /**
    * Errors keyed by source.
    *
@@ -107,12 +116,14 @@ function App() {
    * last failure survived and the message never named what broke.
    */
   const refreshDashboard = useCallback(async () => {
-    const [d, h, tl, ta, pm] = await Promise.all([
+    const [d, h, tl, ta, pm, hb, bk] = await Promise.all([
       window.selfos.invoke("dashboard.day", {}),
       window.selfos.invoke("system.health", undefined),
       window.selfos.invoke("time.timeline", {}),
       window.selfos.invoke("time.topApps", {}),
       window.selfos.invoke("salah.markers", {}),
+      window.selfos.invoke("habits.list", {}),
+      window.selfos.invoke("reading.list", undefined),
     ]);
     const failures: string[] = [];
     if (d.ok) setDay(d.data);
@@ -125,6 +136,10 @@ function App() {
     else failures.push(`apps: ${ta.error}`);
     if (pm.ok) setPrayers(pm.data);
     else failures.push(`prayers: ${pm.error}`);
+    if (hb.ok) setHabits(hb.data);
+    else failures.push(`habits: ${hb.error}`);
+    if (bk.ok) setBooks(bk.data);
+    else failures.push(`reading: ${bk.error}`);
     // Clears only this source's entry, so a recovered dashboard stops showing
     // its own error without erasing an unrelated theme or command failure.
     setErrorFor("dashboard", failures.length ? failures.join("; ") : null);
@@ -199,6 +214,13 @@ function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+        return;
+      }
+      // F-SHELL-06: Ctrl/Cmd+1…7 jump straight to a module.
+      const index = Number(e.key) - 1;
+      if ((e.ctrlKey || e.metaKey) && index >= 0 && index < MODULES.length) {
+        e.preventDefault();
+        setActive(MODULES[index] as ModuleName);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -296,8 +318,33 @@ function App() {
     return now.getTime();
   }, [day?.localDate]);
 
+  const effectiveMode = themeOverride === "auto" ? (theme?.mode ?? "dark") : themeOverride;
+  // A manual light override needs light tokens, not only `color-scheme`: the
+  // Omarchy palette is dark, and the inline vars would otherwise win.
+  const LIGHT_TOKENS: Record<string, string> = {
+    "--bg": "#f7f3ea",
+    "--bg-sunken": "#efe9dd",
+    "--bg-raised": "#e6dfd2",
+    "--fg": "#2b2b2b",
+    "--fg-muted": "#6b6357",
+    "--selection": "#d8cfbf",
+    "--accent": "#2f6f63",
+  };
+  const effectiveStyle =
+    effectiveMode === "light" && theme?.mode !== "light"
+      ? ({ ...style, ...LIGHT_TOKENS } as React.CSSProperties)
+      : style;
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const nextPrayer =
+    prayers.find((p) => {
+      const [h, m] = p.time.split(":").map(Number);
+      return (h ?? 0) * 60 + (m ?? 0) > nowMinutes;
+    }) ?? null;
+  const currentlyReading = books.find((b) => b.percent > 0 && b.lastReadAt !== null) ?? null;
+  const [busyPrayer, setBusyPrayer] = useState<string | null>(null);
+
   return (
-    <div className="app" style={style} data-theme={theme?.mode ?? "dark"}>
+    <div className="app" style={effectiveStyle} data-theme={effectiveMode}>
       <aside className="sidebar">
         <div className="brand">SelfOS</div>
         <nav>
@@ -333,6 +380,8 @@ function App() {
                 stack supplied can be told apart from a computed one. */}
             <div className="muted" title={day ? `Hijri date from ${day.hijriSource}` : undefined}>
               {day?.hijri || "—"}
+              <span className="sep"> · </span>
+              {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
             </div>
           </div>
           <div className="topbar-right">
@@ -343,6 +392,36 @@ function App() {
             <span className="muted">{theme?.name ?? ""}</span>
           </div>
         </header>
+
+        {/* F-SHELL-08: a persistent strip — tracking state, current activity,
+            next prayer and DB health — visible from every module. */}
+        <div className="status-strip" role="status">
+          <span className={`dot ${health?.collector.running && !health.collector.paused ? "on" : ""}`} />
+          <span>
+            {health?.collector.paused ? "paused" : health?.collector.running ? "tracking" : "stopped"}
+          </span>
+          <span className="sep">·</span>
+          <span className="truncate">{apps[0]?.appClass ?? "no activity"}</span>
+          <span className="sep">·</span>
+          <span>{nextPrayer ? `${nextPrayer.prayer} ${nextPrayer.time}` : "no prayer times"}</span>
+          <span className="sep">·</span>
+          <span>{health ? `db ${formatBytes(health.dbSizeBytes)} · ${health.integrity}` : "db …"}</span>
+          <span className="grow" />
+          <select
+            className="input narrow"
+            value={themeOverride}
+            onChange={(e) => {
+              const v = e.target.value as "auto" | "light" | "dark";
+              setThemeOverride(v);
+              localStorage.setItem("selfos.theme.override", v);
+            }}
+            aria-label="Theme override"
+          >
+            <option value="auto">theme: auto</option>
+            <option value="light">theme: light</option>
+            <option value="dark">theme: dark</option>
+          </select>
+        </div>
 
         {error ? <div className="error">IPC error: {error}</div> : null}
 
@@ -420,6 +499,82 @@ function App() {
                   </span>
                 </div>
                 <Timeline segments={segments} dayStart={dayStart} prayers={prayers} />
+                {/* F-DASH-04: next prayer + today's checklist with one-tap logging. */}
+                <section className="panel">
+                  <h2>Prayers</h2>
+                  {nextPrayer ? (
+                    <p className="muted panel-note">
+                      Next: {nextPrayer.prayer} at {nextPrayer.time}
+                    </p>
+                  ) : null}
+                  <div className="prayer-row">
+                    {prayers.map((p) => (
+                      <button
+                        key={p.prayer}
+                        type="button"
+                        className={`mini${p.status ? " done" : ""}`}
+                        disabled={busyPrayer === p.prayer}
+                        onClick={async () => {
+                          setBusyPrayer(p.prayer);
+                          const res = await window.selfos.invoke("salah.log", { prayer: p.prayer });
+                          setBusyPrayer(null);
+                          if (!res.ok) setErrorFor("dashboard-prayer", res.error);
+                          else await refreshDashboard();
+                        }}
+                      >
+                        {p.prayer}
+                        {p.status ? ` · ${p.status}` : ""}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {/* F-DASH-05: today's habits, one tap each. */}
+                <section className="panel">
+                  <h2>Habits</h2>
+                  {habits.filter((h) => h.archivedAt === null).length === 0 ? (
+                    <div className="empty">No habits yet.</div>
+                  ) : (
+                    <div className="habit-row">
+                      {habits
+                        .filter((h) => h.archivedAt === null)
+                        .map((h) => (
+                          <button
+                            key={h.id}
+                            type="button"
+                            className={`mini${h.todayEntry?.status === "done" || h.todayEntry?.status === "clean" ? " done" : ""}`}
+                            onClick={async () => {
+                              const res = await window.selfos.invoke("habits.toggle", { habitId: h.id });
+                              if (!res.ok) setErrorFor("dashboard-habit", res.error);
+                              else await refreshDashboard();
+                            }}
+                          >
+                            {h.name}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* F-DASH-06: currently reading, with progress and resume. */}
+                {currentlyReading ? (
+                  <section className="panel">
+                    <h2>Currently reading</h2>
+                    <p className="muted panel-note">
+                      {currentlyReading.title} · {Math.round(currentlyReading.percent * 100)}%
+                    </p>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => {
+                        setActive("Reading");
+                      }}
+                    >
+                      Resume
+                    </button>
+                  </section>
+                ) : null}
+
                 <div className="legend">
                   {apps.slice(0, 5).map((a) => (
                     <span key={a.appClass} className="legend-item">

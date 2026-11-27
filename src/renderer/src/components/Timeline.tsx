@@ -73,14 +73,21 @@ export function Timeline({
           <div
             key={`${b.startedAt}-${b.appClass}`}
             className="timeline-bar"
-            style={{ left: `${b.left}%`, width: `${b.width}%`, background: colorFor(b.category) }}
-            title={`${b.appClass} · ${b.category} · ${b.seconds}s${b.appTitle ? ` · ${b.appTitle}` : ""}`}
+            style={{ left: `${b.left}%`, width: `${b.width}%`, background: colorFor(b.appClass) }}
+            title={`${b.appClass} · ${b.seconds}s${b.appTitle ? ` · ${b.appTitle}` : ""}`}
           />
         ))}
         {/* F-DASH-02: prayer times as markers over the band. */}
         {prayers.map((p) => {
           const [hh, mm] = p.time.split(":").map(Number);
-          const left = (((hh ?? 0) * 60 + (mm ?? 0)) / 1440) * 100;
+          // Same span as the bars and the axis: a literal 24 h puts every
+          // marker an hour off on a 23/25-hour DST day (round-14).
+          const dayStartMs = new Date(dayStart).getTime();
+          const minutesSinceStart =
+            (hh ?? 0) * 60 +
+            (mm ?? 0) -
+            (new Date(dayStartMs).getHours() * 60 + new Date(dayStartMs).getMinutes());
+          const left = (minutesSinceStart * 60_000 * 100) / dayLengthMs(dayStart);
           return (
             <span
               key={p.prayer}

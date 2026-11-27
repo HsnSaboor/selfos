@@ -24,8 +24,8 @@ dashboard.
 - **M8 (sites)** — complete and verified (39/39): browser-history ingest,
   per-site and per-page time, watch time, categories, provenance.
 
-**461 unit tests**, all nine end-to-end runs green. The app is feature-complete
-against the PRD's M0–M7 release plan.
+**463 unit tests**, all nine end-to-end runs green (M1 is skipped without a
+Hyprland socket). The app is feature-complete against the PRD's M0–M8 release plan.
 
 ## Stack
 
@@ -58,8 +58,8 @@ just verify            # all nine end-to-end runs (M0–M8)
 just where             # where the database lives
 ```
 
-`just` is the primary entry point; `package.json` scripts exist only as the
-targets `just` and `electron-vite` invoke. The raw equivalents still work:
+`just` is the primary entry point and calls the tool binaries directly; the
+`package.json` scripts are a thin human-facing mirror. The raw equivalents still work:
 `bun run dev`, `bunx biome check src tests`, `bunx vitest run`.
 
 > This shell exports `ELECTRON_RUN_AS_NODE=1`, which turns Electron into plain
@@ -72,7 +72,7 @@ targets `just` and `electron-vite` invoke. The raw equivalents still work:
 
 1. `tsc --noEmit` — types across main, preload, renderer, and tests
 2. `biome check src tests` — lint + format (Rust, one pass)
-3. `bunx vitest run` — 461 unit tests covering segment merging, aggregation,
+3. `just test` — 463 unit tests covering segment merging, aggregation,
    schedules, streak semantics, salah windows, anchor resolution, the notes
    index, goal pace math, backup retention, analytics, browser-history ingest,
    and site-time reconciliation
@@ -82,15 +82,15 @@ targets `just` and `electron-vite` invoke. The raw equivalents still work:
 Reproduce any measurement behind a design decision:
 
 ```bash
-npm run spike:sqlite    # node:sqlite vs live browser DB + WAL contention
-npm run spike:probe     # open modes against the live history DB
-npm run spike:memory    # Electron RSS/PSS
-npm run spike:pdf       # pdf.js render throughput
-npm run spike:codecs    # H.264/AAC/VP9 playback
-npm run spike:intl      # Hijri calendar support
-npm run spike:tray      # StatusNotifier registration
-npm run spike:anchors   # highlight anchor stability across zoom/rotation
-npm run spike:hyprland  # Hyprland socket2 event stream
+just spike-sqlite        # node:sqlite vs live browser DB + WAL contention
+just spike-probe         # open modes against the live history DB
+just spike-memory        # Electron RSS/PSS
+just spike-pdf           # pdf.js render throughput
+just spike-codecs        # H.264/AAC/VP9 playback
+just spike-intl          # Hijri calendar support
+just spike-tray          # tray registration
+just spike-anchors       # highlight anchor stability
+just spike-hyprland 25   # Hyprland socket2 event stream
 ```
 
 ## Layout

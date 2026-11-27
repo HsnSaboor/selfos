@@ -1,18 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IngestSummaryView, PageUsageView, SitesView as SitesData } from "../../../shared/api";
+import { CATEGORIES } from "../../../shared/api";
 import { formatDuration } from "../../../shared/format";
-
-const CATEGORIES = [
-  "Work",
-  "Learning",
-  "Reference",
-  "Communication",
-  "Entertainment",
-  "Social",
-  "Shopping",
-  "News",
-  "Uncategorized",
-];
 
 /** Provenance is part of the number, not a footnote (F-TIME-05, D-05). */
 function sourceLabel(s: "history" | "window-title" | "mixed"): string {

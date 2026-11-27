@@ -20,7 +20,7 @@ afterEach(() => {
   }
 });
 
-/** Create a temp directory that is removed after the current test file. */
+/** Create a temp directory that is removed after each test. */
 export function tempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   created.push(dir);

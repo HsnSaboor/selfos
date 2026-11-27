@@ -166,14 +166,14 @@ If Electron proves unworkable (most likely on memory, risk S1), the migration ta
 |---|---|---|
 | Data fetching from IPC | `@tanstack/react-query` | Caching, invalidation, stale-while-revalidate; dashboard must not block on collectors (F-DASH-10) |
 | Virtualized lists | `@tanstack/react-virtual` | Library and annotation lists of thousands of rows (N-PERF-06) |
-| Dense time-series charts | `uPlot` | Canvas-based, ~50 KB, handles 10⁵ points; Recharts rejected for large series (F-TIME-09) |
+| Charts (as built) | hand-rolled SVG/CSS | No chart library installed; the target was `uPlot` |
 | Rings, heatmaps, timelines | Hand-rolled SVG + `d3-scale` | Exact control over the 24 h band and calendar heatmaps; no heavyweight chart runtime |
 | PDF | `pdfjs-dist` + `react-pdf-highlighter` | Text layer + highlight/annotation model already built on pdf.js (F-READ-07…09) |
-| Markdown preview (notes) | `react-markdown` + `remark-gfm` + `rehype-sanitize` | Safe rendering; no raw HTML injection (N-SEC-02) |
-| Icons | `lucide-react` | Consistent, tree-shakeable |
-| Command palette | `cmdk` | F-SHELL-06 |
-| Dates | `date-fns` + `date-fns-tz` | Day bucketing and DST safety (D-04) |
-| Validation | Hand-written guards (`isOneOf`, `requireId`, `requireRange`, `requireDateKey`, `dayCount`) | No schema library is load-bearing: every guard throws a plain `Error` whose message the renderer shows verbatim |
+| Markdown preview (target) | `react-markdown` + `remark-gfm` + `rehype-sanitize` | Not installed: a hand-rolled tokenizer ships, pending dependency approval |
+| Icons (target) | `lucide-react` | Not installed; text/emoji only |
+| Command palette (target) | `cmdk` | Not installed; hand-rolled palette ships |
+| Dates (as built) | `shared/dates.ts` | Day bucketing and DST safety (D-04) |
+| Validation (as built) | Hand-written guards (`isOneOf`, `requireId`, `requireRange`, `requireDateKey`, `dayCount`) | No schema library is load-bearing: every guard throws a plain `Error` whose message the renderer shows verbatim |
 | TOML | Hand-rolled flat reader (`parseFlatToml`) | The theme files are flat `key = "value"`; no dependency is needed (and `Bun.TOML` is unavailable under Node) |
 | Lint/format | **Biome 2.6 (Rust)** | One native binary for lint + format, ~100 ms on this repo; replaces ESLint + Prettier |
 | Task runner | **`just` (Rust)** | Recipes in a `justfile`; keeps the project's commands out of a JS task-runner layer |
@@ -192,9 +192,9 @@ If Electron proves unworkable (most likely on memory, risk S1), the migration ta
 ### 3.4 Security boundary
 
 - The renderer never receives filesystem or process APIs. `contextBridge` exposes a **closed list** of typed methods, each mapped to one validated main-process handler.
-- PDF bytes are served through a **custom privileged protocol** (`selfos-book://<bookId>`) registered with `protocol.handle`, scoped to the library directory. No `file://` access from the renderer.
+- PDF bytes are served through a **custom privileged protocol** (`selfos-book://book/<id>`) registered with `protocol.handle`, scoped to the library directory. The app shell and its pdf.js assets are served from a second privileged scheme, `selfos-app://app/…`, so the page and the worker share one origin. No `file://` access from the renderer.
 - Navigation rules deny all remote navigation in app views; external links open in the system browser.
-- CSP set on every app page: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: selfos-book:; object-src 'none'`.
+- CSP as a meta tag in `index.html`: `default-src 'self'; script-src 'self'; worker-src 'self' blob:; connect-src 'self' selfos-book:; img-src 'self' data: selfos-book:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'`.
 
 ---
 
@@ -627,7 +627,7 @@ Every row carries `source` (`history` vs `window-title`) so the UI can show prov
 - **pdf.js** (`pdfjs-dist`) renders pages to canvas with a separate text layer for selection.
 - **react-pdf-highlighter** provides the highlight/annotation interaction model (text highlights, popovers, scroll-to-highlight) and is built on pdf.js. It is vendored/wrapped rather than used raw so we can add display overrides and our own persistence.
 - The PDF worker runs off the UI thread (`pdfjs-dist/build/pdf.worker.mjs` bundled as an asset); pages render **on demand** with a bounded LRU of rasterized pages (default 12 pages) — F-READ-15, N-PERF-03/05.
-- PDF scripting is disabled (`isEvalSupported: false`, no JS execution) — N-SEC-02.
+- PDF scripting is disabled (`isEvalSupported: false`, passed to `getDocument`) — N-SEC-02.
 
 ### 6.2 Display overrides (the "custom styling" requirement)
 
@@ -815,7 +815,7 @@ Every handler validates its input with hand-written guards and returns a discrim
 | Pure functions | `vitest` | streaks, schedules, pace projection, title parsing, timestamp conversion |
 | Queries | `vitest` + in-memory SQLite | migrations, idempotent ingest, aggregate rebuild |
 | Integrations | `vitest` + recorded fixtures | Hyprland event stream replay, history DB fixture, salah status JSON |
-| UI | Testing Library + happy-dom | module views, empty/error states |
+| UI | logic-level only | DOM-level views are verified by the Electron verifiers, not unit tests |
 | End-to-end | Playwright (`_electron`) | launch, tray actions, open a PDF, log a prayer |
 | Manual checklist | §12.5 | autostart, suspend/resume, theme switch, Wayland drag |
 

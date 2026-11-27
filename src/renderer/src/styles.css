@@ -56,7 +56,7 @@ body {
   padding: 8px 10px;
   border-radius: 8px;
   color: var(--fg-muted);
-  cursor: default;
+  cursor: pointer;
   user-select: none;
 }
 
@@ -1329,3 +1329,50 @@ button.link {
 .heatmap-row { display: grid; grid-template-columns: 34px repeat(24, 1fr); gap: 2px; align-items: center; }
 .heatmap-label { font-size: 11px; color: var(--muted); }
 .heatmap-cell { aspect-ratio: 1; border-radius: 2px; min-height: 8px; }
+
+/* ── round 14: theme scheme, focus, motion, narrow windows ─────────────── */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+.nav-item:focus-visible,
+.mini:focus-visible,
+.ghost:focus-visible,
+.primary:focus-visible,
+.weekday:focus-visible,
+.input:focus-visible,
+.chart-col:focus-visible,
+.kpi:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .sidebar { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent); }
+  .notes-grid, .reader-layout { grid-template-columns: 1fr !important; }
+  .main { overflow: auto; }
+}
+
+/* Round 14: persistent status strip and dashboard quick rows. */
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.status-strip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-muted); }
+.status-strip .dot.on { background: var(--accent); }
+.status-strip .grow { flex: 1; }
+.prayer-row, .habit-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.mini.done { border-color: var(--accent); color: var(--accent); }

@@ -2338,3 +2338,47 @@ clean**. Every finding was reproduced before fixing.
 | verifiers | M0 32, M2 29, M3 32, M4 32, M5 49, M6 48, M7 52, M8 39; M1 skipped (no Hyprland) |
 
 **Round 13 reviewer status:** all three reported. Not clean.
+
+---
+
+# Round 14 — renderer and shared layer
+
+Reviewers: `design_critic` (4 Blockers, 5 Majors, 7 Nits), `codebase_details`
+(2 Blockers, 15 Majors, 11 Nits), `zoom_out` (1 Major, 9 Nits). All reported;
+the round is **not clean**.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 283 | BLOCKER | F-SHELL-08 status strip was not rendered | FIXED — persistent strip (tracking, activity, next prayer, DB, theme override) |
+| 284 | BLOCKER | F-DASH-04/05/06 dashboard cards absent | FIXED — prayer checklist, habit one-tap, currently-reading |
+| 285 | BLOCKER | Delete-module select enumerated array indices, so F-SET-06 could not address a module | FIXED — `DELETE_MODULES.map`, typed `DeleteModule` |
+| 286 | BLOCKER | STACK claimed `isEvalSupported: false`; the reader never set it | FIXED — passed to `getDocument` |
+| 287 | MAJOR | Ctrl+1…7 missing | FIXED |
+| 288 | MAJOR | No manual theme override | FIXED — auto/light/dark persisted, light tokens |
+| 289 | MAJOR | No responsive layout / fixed side panels clipped | FIXED — 1100px breakpoint, single column, `.main` scrolls |
+| 290 | MAJOR | `color-scheme` fixed dark | FIXED — `[data-theme]` rules |
+| 291 | MAJOR | Schedule picker could create a never-due habit | FIXED — sends weekdays/timesPerPeriod |
+| 292 | MAJOR | Bulk categorise ignored errors and the write chain | FIXED — routed through the chain, failures counted |
+| 293 | MAJOR | Two URL allowlists disagreed on `mailto:` | FIXED — main accepts mailto |
+| 294 | MAJOR | Category vocabulary local to the renderer | FIXED — `CATEGORIES` in shared/api |
+| 295 | MAJOR | Progress ring duplicated | FIXED — `Ring.tsx`, circumference derived |
+| 296 | MAJOR | Timeline legend coloured a different key than the bars | FIXED — both use appClass |
+| 297 | MAJOR | Prayer markers divided by a literal 24 h | FIXED — `dayLengthMs` |
+| 298 | MAJOR | STACK library/test/LRU/CSP/scheme/layout claims false | FIXED — corrected |
+| 299 | MAJOR | README spike commands/scripts/counts wrong | FIXED |
+| 300 | NIT | Heatmap max recomputed per cell | FIXED — hoisted |
+| 301 | NIT | nav cursor, focus-visible, reduced motion | FIXED |
+| 302 | NIT | Header lacked the Gregorian date | FIXED |
+| 303 | NIT | `PRAYER_COUNT` retyped as "five" | FIXED |
+| 304 | NIT | temp helper doc, zoom custom option, analytics activity error, palette fuzzy | FIXED/simplified |
+| 305 | NIT | Dead contract surface (habits.clear/heatmap, goals.update, notes.uri, focusSessions), useSeq duplication, reader text-layer a11y, media marker | RECORDED |
+
+## Round 14 verification
+
+| Check | Result |
+|---|---|
+| `tsc` / `biome` | clean |
+| `vitest` | **463 passed** |
+| verifiers | M0 32, M2 29, M3 32, M4 32, M5 49, M6 48, M7 52, M8 39; M1 skipped |
+
+**Round 14 reviewer status:** all three reported. Not clean.

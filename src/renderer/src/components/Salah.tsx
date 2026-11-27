@@ -326,7 +326,7 @@ export function SalahView({ localDate }: { localDate: string }) {
           </span>
         </div>
         <div className="muted" style={{ fontSize: 11 }}>
-          Days with all five prayers accounted for. Excused days do not break the streak.
+          Days with all {PRAYER_COUNT} prayers accounted for. Excused days do not break the streak.
         </div>
       </div>
     </div>

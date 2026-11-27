@@ -3,6 +3,7 @@ import type { EntryStatus, HabitView, HeatmapCell, NewHabitInput, Result } from 
 import { addDays } from "../../../shared/dates";
 import { isComplete } from "../../../shared/habits";
 import { describeSchedule, isoWeekday, WEEKDAY_LABELS } from "../../../shared/schedule";
+import { Ring as RingArc } from "./Ring";
 
 function statusLabel(h: HabitView): string {
   const e = h.todayEntry;
@@ -437,21 +438,7 @@ export function HabitsView({ localDate }: { localDate: string }) {
           </div>
         </div>
         <div className="progress-ring" title={`${due.length ? Math.round((done / due.length) * 100) : 0}%`}>
-          <svg viewBox="0 0 36 36" role="img" aria-label="Completion for today">
-            <title>Completion for today</title>
-            <circle cx="18" cy="18" r="15.5" className="ring-bg" />
-            {/* A zero-length dash with a round cap still paints a dot, so an
-                empty ring renders no foreground arc at all (as Goals does). */}
-            {due.length > 0 ? (
-              <circle
-                cx="18"
-                cy="18"
-                r="15.5"
-                className="ring-fg"
-                strokeDasharray={`${(done / due.length) * 97.4} 97.4`}
-              />
-            ) : null}
-          </svg>
+          <RingArc fraction={due.length ? done / due.length : 0} label="Completion for today" />
           <span>{due.length ? Math.round((done / due.length) * 100) : 0}%</span>
         </div>
       </div>
@@ -528,7 +515,13 @@ export function HabitsView({ localDate }: { localDate: string }) {
                   window.selfos.invoke("habits.changeSchedule", {
                     habitId: h.id,
                     effectiveFrom: entryDate,
-                    schedule: { kind },
+                    schedule: {
+                      kind,
+                      ...(kind === "weekdays" ? { weekdays: h.schedule?.weekdays ?? [1, 2, 3, 4, 5] } : {}),
+                      ...(kind === "times_per_week" || kind === "times_per_month"
+                        ? { timesPerPeriod: h.schedule?.timesPerPeriod ?? 3 }
+                        : {}),
+                    },
                   }),
                 )
               }

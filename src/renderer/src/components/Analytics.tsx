@@ -205,6 +205,8 @@ export function AnalyticsView() {
     void load();
   }, [load]);
 
+  const activityMax = Math.max(1, ...activity.map((c) => c.seconds));
+
   return (
     <div className="analytics">
       <div className="habits-head">
@@ -284,8 +286,7 @@ export function AnalyticsView() {
                   <span className="heatmap-label">{label}</span>
                   {HOURS.map((hour) => {
                     const cell = activity.find((c) => c.weekday === weekday && c.hour === hour);
-                    const max = Math.max(1, ...activity.map((c) => c.seconds));
-                    const intensity = Math.min(1, (cell?.seconds ?? 0) / max);
+                    const intensity = Math.min(1, (cell?.seconds ?? 0) / activityMax);
                     return (
                       <span
                         key={`${weekday}-${hour}`}

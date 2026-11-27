@@ -645,6 +645,19 @@ export interface ThemeTokens {
 }
 
 /** F-SET-06: modules that can be deleted by date range (notes are files). */
+/** Category vocabulary shared by the Sites rules editor and main. */
+export const CATEGORIES = [
+  "Work",
+  "Entertainment",
+  "Social",
+  "Learning",
+  "Reference",
+  "Communication",
+  "Shopping",
+  "News",
+  "Uncategorized",
+] as const;
+
 export const DELETE_MODULES = ["time", "sites", "habits", "salah", "reading", "goals"] as const;
 export type DeleteModule = (typeof DELETE_MODULES)[number];
 
@@ -816,7 +829,7 @@ export interface Api {
   };
   "data.tables": { params: undefined; result: Array<{ name: string; rows: number }> };
   "data.deleteRange": {
-    params: { module: string; from?: string | null; to?: string | null; confirm: true };
+    params: { module: DeleteModule; from?: string | null; to?: string | null; confirm: true };
     result: { deleted: number };
   };
 

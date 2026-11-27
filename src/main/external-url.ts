@@ -12,7 +12,9 @@
 export function isSafeExternalUrl(raw: string): boolean {
   try {
     const { protocol } = new URL(raw);
-    return protocol === "http:" || protocol === "https:" || protocol === "obsidian:";
+    return (
+      protocol === "http:" || protocol === "https:" || protocol === "obsidian:" || protocol === "mailto:"
+    );
   } catch {
     return false;
   }

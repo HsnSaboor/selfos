@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { BackupStatusView as BackupStatus, HealthReport, SystemSettingsView } from "../../../shared/api";
-import { DELETE_MODULES } from "../../../shared/api";
+import { DELETE_MODULES, type DeleteModule } from "../../../shared/api";
 import { formatBytes, formatDateTime } from "../../../shared/format";
 
 /**
@@ -22,7 +22,7 @@ export function DataPage() {
   const [libraryDir, setLibraryDir] = useState("");
   const [backupDir, setBackupDir] = useState("");
   const [excluded, setExcluded] = useState("");
-  const [delModule, setDelModule] = useState("time");
+  const [delModule, setDelModule] = useState<DeleteModule>("time");
   const [delFrom, setDelFrom] = useState("");
   const [delTo, setDelTo] = useState("");
   const [busy, setBusy] = useState(false);
@@ -253,10 +253,10 @@ export function DataPage() {
           <select
             className="input"
             value={delModule}
-            onChange={(e) => setDelModule(e.target.value)}
+            onChange={(e) => setDelModule(e.target.value as DeleteModule)}
             aria-label="Module to delete"
           >
-            {Object.keys(DELETE_MODULES).map((m) => (
+            {DELETE_MODULES.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>

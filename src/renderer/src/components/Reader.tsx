@@ -328,12 +328,15 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
           // runtime; without these the worker stalls on the first page that
           // needs them.
           pending = pdfjs.getDocument({
+            // N-SEC-02: pdf.js defaults to allowing embedded JavaScript; the
+            // type definitions omit the flag, so the cast is deliberate.
+            isEvalSupported: false,
             url: `selfos-book://book/${book.id}`,
             wasmUrl: `${PDFJS_BASE}/wasm/`,
             cMapUrl: `${PDFJS_BASE}/cmaps/`,
             standardFontDataUrl: `${PDFJS_BASE}/standard_fonts/`,
             iccUrl: `${PDFJS_BASE}/iccs/`,
-          }).promise;
+          } as unknown as Parameters<typeof pdfjs.getDocument>[0]).promise;
           cacheDocument(book.id, pending);
         }
         const loaded = await pending.catch((err: unknown) => {
@@ -958,6 +961,7 @@ export function Reader({ book, onBack }: { book: BookView; onBack: () => void })
             aria-label="Zoom mode"
           >
             <option value="fit-width">Fit width</option>
+            <option value="custom">Custom zoom</option>
             <option value="fit-page">Fit page</option>
           </select>
           <label className="toggle">

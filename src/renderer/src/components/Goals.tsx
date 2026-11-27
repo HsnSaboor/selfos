@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { GoalKindView, GoalView, Result } from "../../../shared/api";
-
 import { formatDayMonth, formatLongDate } from "../../../shared/format";
+import { Ring as RingArc } from "./Ring";
 
 const KIND_LABEL: Record<GoalKindView, string> = {
   numeric: "Numeric target",
@@ -17,15 +17,7 @@ function Ring({ fraction, offPace, label }: { fraction: number; offPace: boolean
   const pct = Math.round(fraction * 100);
   return (
     <div className={`goal-ring${offPace ? " off" : ""}`} title={label}>
-      <svg viewBox="0 0 36 36" role="img" aria-label={label}>
-        <title>{label}</title>
-        <circle cx="18" cy="18" r="15.5" className="ring-bg" />
-        {/* A zero-length dash with a round cap still paints a dot, so an empty
-            ring renders no foreground arc at all. */}
-        {fraction > 0 ? (
-          <circle cx="18" cy="18" r="15.5" className="ring-fg" strokeDasharray={`${fraction * 97.4} 97.4`} />
-        ) : null}
-      </svg>
+      <RingArc fraction={fraction} label={label} />
       <span>{pct}%</span>
     </div>
   );
