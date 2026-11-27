@@ -25,17 +25,20 @@ export interface OpenOptions {
 
 export class Db {
   readonly raw: DatabaseSync;
+  /** Absolute path of the open file (":memory:" for tests). */
+  readonly filePath: string;
   #depth = 0;
 
-  private constructor(raw: DatabaseSync) {
+  private constructor(raw: DatabaseSync, filePath: string) {
     this.raw = raw;
+    this.filePath = filePath;
   }
 
   static open(file: string, opts: OpenOptions = {}): Db {
     if (!opts.readonly) mkdirSync(dirname(file), { recursive: true });
     const uri = opts.immutable ? `file:${file}?immutable=1` : file;
     const raw = new DatabaseSync(uri, { readOnly: opts.readonly ?? false });
-    const db = new Db(raw);
+    const db = new Db(raw, file);
     db.raw.exec(`PRAGMA busy_timeout = ${opts.busyTimeoutMs ?? 5000};`);
     if (!opts.readonly) {
       db.raw.exec("PRAGMA journal_mode = WAL;");

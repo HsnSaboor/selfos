@@ -263,3 +263,49 @@ export function activityMatrix(db: Db, days = 7, today = localDateKey(new Date()
   }
   return out;
 }
+
+/** Focus segments for one local day (F-DASH-02 timeline). */
+export function timelineSegments(
+  db: Db,
+  localDate: string,
+): Array<{
+  startedAt: number;
+  endedAt: number;
+  appClass: string;
+  appTitle: string;
+  seconds: number;
+  category: string;
+}> {
+  const rows = db.all<{ started_at: number; ended_at: number; app_class: string; app_title: string | null }>(
+    `SELECT started_at, ended_at, app_class, app_title
+       FROM focus_event WHERE local_date = ? ORDER BY started_at`,
+    localDate,
+  );
+  return rows.map((r) => ({
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    appClass: r.app_class,
+    appTitle: r.app_title ?? "",
+    seconds: Math.max(0, Math.round((r.ended_at - r.started_at) / 1000)),
+    category: "App",
+  }));
+}
+
+/** App usage for one local day, share of the day's total (F-DASH-01). */
+export function topAppsForDay(
+  db: Db,
+  localDate: string,
+): Array<{ appClass: string; seconds: number; share: number }> {
+  const rows = db.all<{ app_class: string; ms: number }>(
+    `SELECT app_class, SUM(ended_at - started_at) AS ms
+       FROM focus_event WHERE local_date = ?
+      GROUP BY app_class ORDER BY ms DESC`,
+    localDate,
+  );
+  const total = rows.reduce((a, r) => a + r.ms, 0) || 1;
+  return rows.map((r) => ({
+    appClass: r.app_class,
+    seconds: Math.round(r.ms / 1000),
+    share: r.ms / total,
+  }));
+}

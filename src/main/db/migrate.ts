@@ -41,6 +41,17 @@ export function migrate(db: Db): MigrateResult {
   const pending = loadMigrations().filter((m) => m.version > from);
   const applied: string[] = [];
 
+  if (pending.length > 0) {
+    // N-REL-03: a restore point before the first change, not the next
+    // scheduled backup. A failed forward migration is otherwise unrecoverable.
+    try {
+      const last = pending[pending.length - 1]?.version ?? from;
+      db.raw.prepare("VACUUM INTO ?").run(`${db.filePath}.premigrate-${from}-${last}.sqlite`);
+    } catch (err) {
+      console.error("[migrate] pre-migration backup failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
   for (const m of pending) {
     db.transaction(() => {
       db.raw.exec(m.sql);

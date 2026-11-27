@@ -3,7 +3,8 @@
  * handlers call. Kept plain (no DI framework) — there is one of everything.
  */
 
-import { existsSync, rmSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -45,7 +46,14 @@ import { HabitsService } from "../modules/habits/service";
 import { NotesService } from "../modules/notes/service";
 import { ReadingService } from "../modules/reading/service";
 import { SalahService } from "../modules/salah/service";
-import { activityMatrix, analyse, hourlyProfile, topDomains } from "../modules/time/analytics";
+import {
+  activityMatrix,
+  analyse,
+  hourlyProfile,
+  timelineSegments,
+  topAppsForDay,
+  topDomains,
+} from "../modules/time/analytics";
 import { TimeCollector } from "../modules/time/collector";
 import {
   categoryForDomain,
@@ -91,8 +99,12 @@ const DELETE_MODULES: Record<string, Array<{ table: string; column: string }>> =
   ],
   reading: [{ table: "reading_session", column: "local_date" }],
   goals: [
-    { table: "goal", column: "start_date" },
+    // Children first: goal_progress/goal_milestone reference goal(id) with no
+    // ON DELETE, and foreign_keys is ON, so deleting the parent first raises
+    // SQLITE_CONSTRAINT_FOREIGNKEY and rolls the whole range back.
+    { table: "goal_progress", column: "at" },
     { table: "goal_milestone", column: "due_date" },
+    { table: "goal", column: "start_date" },
   ],
 };
 
@@ -136,7 +148,6 @@ export class Services {
   /** Resolver for the one in-flight worker request, if any. */
   #ingestPending: ((reply: IngestReply) => void) | null = null;
   #lastIngest: IngestSummary[] = [];
-  #theme: ThemeTokens;
 
   constructor(userDataDir: string) {
     this.userDataDir = userDataDir;
@@ -147,7 +158,6 @@ export class Services {
     this.restoredFrom = applyPendingRestore(this.dbPath);
     this.db = Db.open(this.dbPath);
     migrate(this.db);
-    this.#theme = readTheme();
     this.collector = new TimeCollector(this.db, {
       sessionId: detectSessionId(),
       // The reading module owns reading_session; time asks it for the day total
@@ -303,7 +313,7 @@ export class Services {
   #ensureIngestWorker(): Worker {
     if (this.#ingestWorker) return this.#ingestWorker;
     // `__dirname` is `out/main` at runtime, and electron-vite emits the worker
-    // next to the main bundle (see the `ingestWorker` input in the config).
+    // next to the main bundle (see the `ingest-worker` input in the config).
     const workerPath = join(__dirname, "ingest-worker.cjs");
     const worker = new Worker(workerPath);
     worker.on("message", (reply: IngestReply) => this.#ingestPending?.(reply));
@@ -379,6 +389,16 @@ export class Services {
         console.error("[backup] failed:", err instanceof Error ? err.message : err);
       }
     };
+    // Safety copies from earlier restores are full-size DBs; keep 7 days.
+    try {
+      for (const name of readdirSync(this.userDataDir)) {
+        if (!name.startsWith("selfos.sqlite.pre-restore-")) continue;
+        const p = join(this.userDataDir, name);
+        if (Date.now() - statSync(p).mtimeMs > 7 * 86_400_000) rmSync(p, { force: true });
+      }
+    } catch {
+      /* best effort */
+    }
     setTimeout(run, 15_000);
     this.#backupTimer = setInterval(run, 6 * 60 * 60 * 1000);
   }
@@ -439,11 +459,6 @@ export class Services {
     return readTheme();
   }
 
-  refreshTheme(): ThemeTokens {
-    this.#theme = readTheme();
-    return this.#theme;
-  }
-
   /** Called by the main process so a pause from the tray reaches the renderer. */
   onTrackingChange: ((state: { running: boolean; paused: boolean }) => void) | null = null;
 
@@ -492,10 +507,6 @@ export class Services {
     this.#integrity = this.db.integrityCheck();
     this.#integrityAt = Date.now();
     return { integrity: this.#integrity, at: this.#integrityAt };
-  }
-
-  integrityAt(): number | null {
-    return this.#integrityAt;
   }
 
   private browserProfiles(): HealthReport["browserProfiles"] {
@@ -561,41 +572,22 @@ export class Services {
   }
 
   timeline(localDate: string): TimelineSegment[] {
-    const date = localDate;
-    return this.db
-      .all<{ started_at: number; ended_at: number; app_class: string; app_title: string }>(
-        `SELECT started_at, ended_at, app_class, app_title
-           FROM focus_event WHERE local_date = ? ORDER BY started_at`,
-        date,
-      )
-      .map((r) => ({
-        startedAt: r.started_at,
-        endedAt: r.ended_at,
-        appClass: r.app_class,
-        appTitle: r.app_title ?? "",
-        seconds: Math.max(0, Math.round((r.ended_at - r.started_at) / 1000)),
-        // F-DASH-02: colour the band by category, not only by app class.
-        category: isBrowserClass(r.app_class)
-          ? categoryForDomain(this.db, guessSite(r.app_title ?? "")?.site ?? "")
-          : "App",
-      }));
-  }
-
-  topApps(localDate: string): AppUsage[] {
-    const rows = this.db.all<{ app_class: string; ms: number }>(
-      `SELECT app_class, SUM(ended_at - started_at) AS ms
-         FROM focus_event WHERE local_date = ?
-        GROUP BY app_class ORDER BY ms DESC`,
-      localDate,
-    );
-    const total = rows.reduce((a, r) => a + r.ms, 0) || 1;
-    return rows.map((r) => ({
-      appClass: r.app_class,
-      seconds: Math.round(r.ms / 1000),
-      share: r.ms / total,
+    // The time module owns focus_event; the container only delegates.
+    return timelineSegments(this.db, localDate).map((r) => ({
+      startedAt: r.startedAt,
+      endedAt: r.endedAt,
+      appClass: r.appClass,
+      appTitle: r.appTitle,
+      seconds: r.seconds,
+      category: isBrowserClass(r.appClass)
+        ? categoryForDomain(this.db, guessSite(r.appTitle)?.site ?? "")
+        : "App",
     }));
   }
 
+  topApps(localDate: string): AppUsage[] {
+    return topAppsForDay(this.db, localDate);
+  }
   rebuildDay(localDate: string): { rebuilt: string } {
     this.collector.rebuild(localDate);
     return { rebuilt: localDate };
@@ -649,6 +641,20 @@ export class Services {
     if (!tables) throw new Error(`unknown module: ${module}`);
     let deleted = 0;
     this.db.transaction(() => {
+      // goal_progress has no day column (at is epoch ms): delete by parent goal
+      // in the range, and milestones by parent too (due_date may be NULL).
+      if (module === "goals") {
+        const goals = this.db.all<{ id: number }>(
+          `SELECT id FROM goal WHERE start_date >= ? AND start_date <= ?`,
+          from ?? "0000-01-01",
+          to ?? "9999-12-31",
+        );
+        const ids = goals.map((g) => g.id);
+        for (const id of ids) {
+          this.db.run("DELETE FROM goal_progress WHERE goal_id = ?", id);
+          this.db.run("DELETE FROM goal_milestone WHERE goal_id = ?", id);
+        }
+      }
       for (const { table, column } of tables) {
         const where: string[] = [];
         const params: unknown[] = [];
@@ -660,6 +666,7 @@ export class Services {
           where.push(`${column} <= ?`);
           params.push(to);
         }
+        if (module === "goals" && table !== "goal") continue;
         const sql = `DELETE FROM ${table}${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
         deleted += this.db.run(sql, ...params).changes;
       }
@@ -688,13 +695,10 @@ export class Services {
   }
 }
 
-export { localDateKey };
-
 /** XDG session id, with a loginctl fallback when the env var is absent. */
 function detectSessionId(): string {
   if (process.env.XDG_SESSION_ID) return process.env.XDG_SESSION_ID;
   try {
-    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
     const out = execFileSync("loginctl", ["list-sessions", "--no-legend"], { encoding: "utf8" });
     const line = out.split("\n").find((l) => l.includes(process.env.USER ?? ""));
     return line?.trim().split(/\s+/)[0] ?? "";
@@ -703,8 +707,6 @@ function detectSessionId(): string {
   }
 }
 
-/** SP-4 verified `islamic-umalqura` is available natively. */
-
 /**
  * earlyoom on this machine prefers killing Electron processes (SP-2).
  * `systemctl show -p ExecStart` returns the unexpanded `$EARLYOOM_ARGS`
@@ -712,10 +714,8 @@ function detectSessionId(): string {
  */
 function detectEarlyoomPreference(): boolean {
   try {
-    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
     const pid = execFileSync("pgrep", ["-x", "earlyoom"], { encoding: "utf8" }).trim().split("\n")[0];
     if (!pid) return false;
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
     return /--prefer[= ]+\S*electron/i.test(cmdline);
   } catch {

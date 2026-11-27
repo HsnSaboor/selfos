@@ -154,3 +154,39 @@ describe("round 15", () => {
     expect(isInside("/tmp/library", "/tmp/library")).toBe(false);
   });
 });
+
+describe("round 16", () => {
+  it("deletes a goal range with children (foreign keys on)", async () => {
+    const { Db } = await import("../src/main/db/driver");
+    const { migrate } = await import("../src/main/db/migrate");
+    const { Services } = await import("../src/main/services/context");
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "selfos-del-"));
+    const db = Db.open(join(dir, "selfos.sqlite"));
+    migrate(db);
+    const svc = new Services(dir);
+    const id = svc.goals.create({ title: "Read", kind: "numeric", startDate: "2026-11-01", targetValue: 10 });
+    svc.goals.record(id, 3);
+    svc.goals.addMilestone(id, "half", "2026-11-10");
+    const res = svc.deleteRange("goals", "2026-11-01", "2026-11-30", true);
+    expect(res.deleted).toBeGreaterThan(0);
+    expect(svc.goals.list(false).length).toBe(0);
+    db.close();
+  });
+
+  it("takes a pre-migration snapshot before applying pending migrations", async () => {
+    const { Db } = await import("../src/main/db/driver");
+    const { migrate } = await import("../src/main/db/migrate");
+    const { mkdtempSync, readdirSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "selfos-mig-"));
+    const file = join(dir, "selfos.sqlite");
+    const db = Db.open(file);
+    migrate(db);
+    db.close();
+    expect(readdirSync(dir).some((n) => n.includes(".premigrate-"))).toBe(true);
+  });
+});

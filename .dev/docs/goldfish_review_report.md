@@ -2419,3 +2419,33 @@ not clean.
 | verifiers | all green (M0 32, M2 29, M3 32, M4 32, M5 49, M6 48, M7 52, M8 39; M1 skipped) |
 
 **Round 15 reviewer status:** all three reported. Not clean.
+
+---
+
+# Round 16 — data layer, service container, IPC, integrations
+
+Reviewers: `design_critic` (2 Majors, 3 Nits), `codebase_details` (3 Majors, 7
+Nits), `zoom_out` (6 Nits). All reported; not clean (Majors).
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 322 | MAJOR | No pre-migration backup despite N-REL-03 / STACK §4.3 | FIXED — `VACUUM INTO` before the first pending migration + test |
+| 323 | MAJOR | `data.deleteRange("goals")` violated FKs (goal_progress/milestones) and missed NULL due dates | FIXED — children first by goal_id, then parent; test |
+| 324 | MAJOR | STACK still claimed zod in §5.4/§12 | FIXED |
+| 325 | NIT | Dead `#theme`/`refreshTheme`/`integrityAt`/localDateKey re-export | FIXED — removed |
+| 326 | NIT | Inline `require` in context helpers | FIXED — top-level imports |
+| 327 | NIT | timeline/topApps SQL in the container | FIXED — moved to the time module |
+| 328 | NIT | `mergeSegments` production-dead | FIXED — removed (test oracle dropped) |
+| 329 | NIT | Restore safety copies never pruned | FIXED — 7-day prune |
+| 330 | NIT | Worker code-0 exit left the request pending | FIXED — any exit resolves |
+| 331 | NIT | 75-channel comment, M9 id, SP-4 comment, ingest-worker name, DEFAULT_CONFIG, ingest_run DDL | FIXED |
+
+## Round 16 verification
+
+| Check | Result |
+|---|---|
+| `tsc` / `biome` | clean |
+| `vitest` | **465 passed** (2 new) |
+| verifiers | all green; M1 skipped |
+
+**Round 16 reviewer status:** all three reported. Not clean.

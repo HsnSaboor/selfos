@@ -1,4 +1,4 @@
--- M9: focus-session accounting (PRD F-TIME-08) and the longest focus stretch
+-- M1/M7: focus-session accounting (PRD F-TIME-08) and the longest focus stretch
 -- (F-TIME-10). Both are derived from focus_event and stored on the day
 -- aggregate so the dashboard and analytics read one row.
 --

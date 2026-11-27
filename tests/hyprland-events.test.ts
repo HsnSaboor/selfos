@@ -207,19 +207,4 @@ describe("SegmentMerger", () => {
     expect(merger.push(seg(500, 500, "x"))).toEqual([]);
     expect(merger.flush()).toEqual([]);
   });
-
-  it("agrees with mergeSegments on a whole stream", () => {
-    // The streaming form and the batch form must not drift: this is the property
-    // that lets the collector use one and the tests keep testing the other.
-    const stream = [
-      seg(0, 200, "bar"),
-      seg(200, 5000, "helium", "A"),
-      seg(5000, 6000, "helium", "A"),
-      seg(6000, 6600, "foot"),
-      seg(6600, 12000, "foot"),
-      seg(12000, 12100, "bar"),
-      seg(12100, 20000, "helium", "B"),
-    ];
-    expect(run(stream)).toEqual(mergeSegments(stream));
-  });
 });

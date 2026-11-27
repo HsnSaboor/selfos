@@ -21,6 +21,7 @@ export interface SalahConfig {
   customTimes: Partial<Record<PrayerId | "sunrise", string>>;
 }
 
+/** Fallback location/timezone when salah.json is absent (Gujranwala, UTC+5). */
 export const DEFAULT_CONFIG: SalahConfig = {
   city: "Gujranwala",
   latitude: 32.1877,

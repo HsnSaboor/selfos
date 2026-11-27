@@ -296,6 +296,7 @@ CREATE TABLE ingest_run (
   finished_at  INTEGER,
   rows_read    INTEGER NOT NULL DEFAULT 0,
   rows_new     INTEGER NOT NULL DEFAULT 0,
+  strategy     TEXT,
   error        TEXT
 );
 
@@ -606,7 +607,7 @@ Every row carries `source` (`history` vs `window-title`) so the UI can show prov
 
 ### 5.4 Salah bridge
 
-- **Read:** invoke `~/.local/bin/salah-ctl status` (JSON) on a 30 s timer and on demand. Validate with `zod`; on failure, fall back to local computation.
+- **Read:** invoke `~/.local/bin/salah-ctl status` (JSON) on a 30 s timer and on demand. Validate with hand-written guards; on failure, fall back to local computation.
 - **Fallback compute:** `adhan` npm package configured as **Karachi (18°/18°), Hanafi Asr** to match the existing config (`~/.config/omarchy/salah.json`). Same method, no drift.
 - **Never** write `/tmp/salah_playing.json` and never start adhan audio (F-SALAH-09).
 - **Optional config bridge:** read `salah.json`; write only if a round-trip diff is empty (i.e. every unknown field is preserved). Otherwise the settings page is read-only and says why (F-SALAH-10).
@@ -776,14 +777,14 @@ selfos/
 ├── src/
 │   ├── main/                # Electron main process (Node 24)
 │   │   ├── index.ts         # app lifecycle, windows, tray, single-instance
-│   │   ├── ipc/             # typed channel handlers + zod validation
+│   │   ├── ipc/             # typed channel handlers + hand-written guard validation
 │   │   ├── db/              # driver.ts (only node:sqlite import), migrations, queries
 │   │   ├── modules/         # reading, habits, time, salah, notes, goals
 │   │   ├── integrations/    # hyprland, browser-history, salah-bridge, obsidian, omarchy-theme
 │   │   └── services/        # backup, export, scheduler, worker-thread pool
 │   ├── collector/           # collector logic (process-agnostic; utilityProcess in v1)
 │   ├── preload/             # contextBridge surface only
-│   ├── shared/              # contracts: IPC types, zod schemas, pure functions
+│   ├── shared/              # contracts: IPC types, hand-written contract types, pure functions
 │   └── renderer/            # React app (Vite)
 ├── assets/pdfjs/            # worker, fonts, cmaps (bundled as extraResources)
 ├── ops/systemd/             # selfos.service

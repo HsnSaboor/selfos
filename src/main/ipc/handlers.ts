@@ -731,7 +731,7 @@ export function registerIpc(svc: Services): void {
       try {
         // The channel *names* are closed; the *callers* were not. Any future
         // second webContents, embedded frame, or surviving window could reach
-        // the full 75-channel API, so the sender's origin is checked too.
+        // the full channel set, so the sender's origin is checked too.
         const url = event.senderFrame?.url ?? "";
         const trusted =
           url.startsWith("selfos-app://app/") ||
