@@ -175,9 +175,7 @@ export class HabitsService {
   }
 
   /** Schedule versions for one habit, oldest first (D-08 audit). */
-  scheduleAudit(
-    habitId: number,
-  ): Array<{
+  scheduleAudit(habitId: number): Array<{
     effectiveFrom: string;
     kind: string;
     weekdays: number[] | null;
