@@ -815,6 +815,15 @@ export interface Api {
   "time.markUntracked": { params: { from: string; to: string; reason?: string }; result: { marked: true } };
   "time.mergeEvents": { params: { fromId: number; intoId: number }; result: { merged: true } };
   "data.importJson": { params: { path: string }; result: { imported: number } };
+  "habits.schedules": {
+    params: { habitId: number };
+    result: Array<{
+      effectiveFrom: string;
+      kind: string;
+      weekdays: number[] | null;
+      timesPerPeriod: number | null;
+    }>;
+  };
   "habits.setReminder": { params: { habitId: number; remindAt: string | null }; result: { ok: true } };
   "analytics.hourly": { params: { localDate?: string }; result: HourBucketView[] };
   "analytics.domains": { params: { days?: number }; result: DomainUsageView[] };
@@ -895,6 +904,7 @@ export const API_CHANNELS = [
   "time.markUntracked",
   "time.mergeEvents",
   "data.importJson",
+  "habits.schedules",
   "habits.setReminder",
   "backup.create",
   "backup.restore",

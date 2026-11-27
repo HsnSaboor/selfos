@@ -483,6 +483,10 @@ const handlers: { [K in ApiName]: Handler<K> } = {
     if (!p || typeof p.path !== "string" || !p.path) throw new Error("path is required");
     return importJson(svc.db, p.path);
   },
+  "habits.schedules": (p, svc) => {
+    requireId(p?.habitId, "habitId");
+    return svc.habits.scheduleAudit(p.habitId);
+  },
   "habits.setReminder": (p, svc) => {
     requireId(p?.habitId, "habitId");
     if (p.remindAt !== null && (typeof p.remindAt !== "string" || !/^\d{2}:\d{2}$/.test(p.remindAt))) {

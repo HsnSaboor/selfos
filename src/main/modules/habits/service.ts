@@ -134,7 +134,15 @@ export class HabitsService {
     );
     return rows.map((row) => {
       const habit = this.#toDefinition(row);
-      return { row, habit, versions: this.schedules(habit.id), entries: this.entries(habit.id) };
+      return {
+        row,
+        habit,
+        versions: this.#db.all<ScheduleVersion>(
+          "SELECT * FROM habit_schedule WHERE habit_id = ? ORDER BY effective_from",
+          habit.id,
+        ),
+        entries: this.entries(habit.id),
+      };
     });
   }
 
@@ -164,6 +172,33 @@ export class HabitsService {
    */
   changeSchedule(habitId: number, schedule: NewHabit["schedule"], effectiveFrom: string): void {
     this.#insertSchedule(habitId, schedule, effectiveFrom);
+  }
+
+  /** Schedule versions for one habit, oldest first (D-08 audit). */
+  scheduleAudit(
+    habitId: number,
+  ): Array<{
+    effectiveFrom: string;
+    kind: string;
+    weekdays: number[] | null;
+    timesPerPeriod: number | null;
+  }> {
+    return this.#db
+      .all<{
+        effective_from: string;
+        kind: string;
+        weekdays: string | null;
+        times_per_period: number | null;
+      }>(
+        "SELECT effective_from, kind, weekdays, times_per_period FROM habit_schedule WHERE habit_id = ? ORDER BY effective_from",
+        habitId,
+      )
+      .map((r) => ({
+        effectiveFrom: r.effective_from,
+        kind: r.kind,
+        weekdays: r.weekdays ? (r.weekdays.split(",").map(Number) as number[]) : null,
+        timesPerPeriod: r.times_per_period,
+      }));
   }
 
   /** F-HABIT-11: set (or clear) a local HH:MM reminder. */

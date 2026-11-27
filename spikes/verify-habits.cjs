@@ -106,7 +106,9 @@ app.whenReady().then(async () => {
   const afterB = (afterList.ok ? afterList.data : []).find((h) => h.id === bId);
   step("schedule-change-keeps-history", (afterB?.streak.current ?? 0) >= beforeChange - 1,
     `before ${beforeChange}, after ${afterB?.streak.current} (unit ${afterB?.streak.unit})`);
-  step("schedule-change-applied", afterB?.schedule?.kind === "weekdays", JSON.stringify(afterB?.schedule));
+  const versions = await call("habits.schedules", { habitId: bId });
+  const applied = versions.ok && versions.data.some((v) => v.kind === "weekdays");
+  step("schedule-change-applied", applied, JSON.stringify(versions.ok ? versions.data : versions));
 
   // ── heatmap ───────────────────────────────────────────────────────────
   const hm = await call("habits.heatmap", { habitId: bId, days: 84, localDate: today });
