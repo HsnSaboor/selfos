@@ -19,6 +19,8 @@ export interface GoalInput {
   startDate: string;
   targetDate?: string | null;
   parentId?: number | null;
+  /** Optional link to a habit/module metric (F-GOAL-01); free text in v1. */
+  source?: string | null;
 }
 
 export interface GoalRow {

@@ -61,6 +61,8 @@ export interface GoalView {
   /** Mean of child fractions when this goal has children (F-GOAL-08). */
   rollup: number | null;
   childCount: number;
+  /** Free-text link to a habit/module metric (F-GOAL-01), or "manual". */
+  source: string;
   /** Most recent contributions, newest first (F-GOAL-09). */
   contributions: ProgressView[];
 }
@@ -99,15 +101,16 @@ export class GoalsService {
     const res = this.#db.run(
       `INSERT INTO goal (title, description, kind, target_value, unit, start_date, target_date,
                          status, source, parent_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'manual', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
       valid.title,
       valid.description ?? null,
       valid.kind,
-      valid.targetValue,
-      valid.unit,
+      valid.targetValue ?? null,
+      valid.unit ?? null,
       valid.startDate,
-      valid.targetDate,
-      valid.parentId,
+      valid.targetDate ?? null,
+      valid.source ?? "manual",
+      valid.parentId ?? null,
       Date.now(),
     );
     return Number(res.lastInsertRowid);
@@ -334,6 +337,7 @@ export class GoalsService {
             )
           : null,
       childCount: childViews.length,
+      source: row.source ?? "manual",
       contributions: progress.map((p) => ({
         id: p.id,
         at: p.at,

@@ -5,7 +5,9 @@
  * 18°/18° angles and Hanafi Asr. Verified against the live `autoTime` values
  * (max drift 1 minute), so the fallback never silently changes prayer windows.
  */
+
 import { CalculationMethod, Coordinates, Madhab, PrayerTimes } from "adhan";
+import { minutesOfDay } from "../../../shared/dates";
 import { PRAYER_LABELS, type PrayerId, type PrayerSlot, type SalahTimes } from "./bridge";
 
 export interface SalahConfig {
@@ -61,11 +63,6 @@ function hm(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function minutesOf(time: string): number {
-  const [h, m] = time.split(":").map(Number) as [number, number];
-  return h * 60 + m;
-}
-
 export function computeTimes(config: SalahConfig, now: Date): SalahTimes {
   const params = CalculationMethod.Karachi();
   params.fajrAngle = config.fajrAngle;
@@ -97,18 +94,18 @@ export function computeTimes(config: SalahConfig, now: Date): SalahTimes {
   // Current/next windows, using the same convention as salah-ctl: a prayer is
   // "current" until the next one begins; after Isha, Isha stays current.
   const nowMin = now.getHours() * 60 + now.getMinutes();
-  const sorted = [...prayers].sort((a, b) => minutesOf(a.time) - minutesOf(b.time));
+  const sorted = [...prayers].sort((a, b) => minutesOfDay(a.time) - minutesOfDay(b.time));
 
   let current: PrayerId | null = null;
-  for (const p of sorted) if (minutesOf(p.time) <= nowMin) current = p.id;
+  for (const p of sorted) if (minutesOfDay(p.time) <= nowMin) current = p.id;
 
   let next: SalahTimes["next"] = null;
-  const upcoming = sorted.find((p) => minutesOf(p.time) > nowMin);
+  const upcoming = sorted.find((p) => minutesOfDay(p.time) > nowMin);
   if (upcoming) {
     next = {
       id: upcoming.id,
       time: upcoming.time,
-      remainingSec: (minutesOf(upcoming.time) - nowMin) * 60,
+      remainingSec: (minutesOfDay(upcoming.time) - nowMin) * 60,
     };
   } else {
     const tomorrow = new PrayerTimes(coords, new Date(now.getTime() + 86_400_000), params);
@@ -116,7 +113,7 @@ export function computeTimes(config: SalahConfig, now: Date): SalahTimes {
     next = {
       id: "fajr",
       time: fajrTomorrow,
-      remainingSec: (24 * 60 - nowMin + minutesOf(fajrTomorrow)) * 60,
+      remainingSec: (24 * 60 - nowMin + minutesOfDay(fajrTomorrow)) * 60,
     };
   }
 

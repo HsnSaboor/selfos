@@ -64,3 +64,9 @@ export function isDateKey(value: unknown): value is string {
     roundTrip.getUTCFullYear() === y && roundTrip.getUTCMonth() === m - 1 && roundTrip.getUTCDate() === d
   );
 }
+
+/** Minutes since local midnight for an "HH:MM" clock string. */
+export function minutesOfDay(hm: string): number {
+  const [h, m] = hm.split(":").map(Number) as [number, number];
+  return h * 60 + m;
+}

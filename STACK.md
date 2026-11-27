@@ -422,12 +422,12 @@ CREATE TABLE goal (
   id           INTEGER PRIMARY KEY,
   title        TEXT NOT NULL,
   description  TEXT,
-  kind         TEXT NOT NULL,             -- numeric|milestones|quota
+  kind         TEXT NOT NULL,             -- numeric|milestone|quota
   target_value REAL,
   unit         TEXT,
   start_date   TEXT NOT NULL,
   target_date  TEXT,
-  status       TEXT NOT NULL DEFAULT 'active', -- active|done|abandoned
+  status       TEXT NOT NULL DEFAULT 'active', -- active|completed|abandoned
   source       TEXT,                      -- manual|reading.pages|time.focus|salah.all
   created_at   INTEGER NOT NULL,
   closed_at    INTEGER
@@ -677,12 +677,15 @@ Re-anchoring on load, in order:
 
 ## 7. Habits module
 
-- Pure functions in `src/shared/habits/`:
-  - `scheduleFor(habitId, date)` → the schedule version in effect (D-08).
-  - `isScheduled(habit, schedule, date)` → boolean.
-  - `streak(habitId, entries, schedules, today)` → `{ current, longest, unit }`, honoring skips (F-HABIT-06/07/08).
-  - `completionRate(habitId, range)`.
+- Pure functions in `src/main/modules/habits/` (`src/shared/habits.ts` holds only `isComplete`):
+  - `scheduleFor(versions, dateKey)` → the schedule version in effect (D-08).
+  - `isDueOn(schedule, dateKey)` → boolean.
+  - `computeStreak(input)` → `{ current, longest, unit }`, honoring skips (F-HABIT-06/07/08).
+  - `completionRate(input, lookbackDays)` and `heatmapDays(input, days)`.
+  - The Salah streak is computed over a 30-day slice (`recentDays(30)`), so `longest` is capped at 30; the heatmap reads 84 days separately.
+  - Goal contributions and the progress read are capped at the latest 50 rows (F-GOAL-09).
 - **Backfill** writes a normal `habit_entry` with `created_at` = now and `local_date` = the target day; no separate model (F-HABIT-10).
+- **F-SALAH-07** weekly/monthly completion views are **not implemented in v1**; the 84-day daily grid is the shipped surface.
 - **Linked habits** (`source='linked:reading'`) are **not implemented in v1**: the column exists, no code writes or reads it. The paragraph that described aggregation-time resolution was removed with the component.
 - Streaks are never stored; they are computed per render from a day-indexed query (D-03).
 
@@ -729,7 +732,7 @@ Re-anchoring on load, in order:
 
 - **Times:** from the existing `salah-ctl status` contract (F-SALAH-01); fallback `adhan` with Karachi 18/18 + Hanafi (F-SALAH-02).
 - **Outcome model:** `on_time` (before the next prayer's start, and within a configurable window), `late` (after that window but same day), `missed`, `excused`.
-- **Qada:** a missed prayer writes `qada_event(+1)`; marking a make-up writes `qada_event(-1)` and links the date. Debt per prayer = `SUM(delta)` (F-SALAH-05).
+- **Qada:** a missed prayer writes `qada_event(+1)`; marking a make-up writes `qada_event(-1)` and links the date. Debt per prayer = `max(0, SUM(delta))` (F-SALAH-05); the floor is what keeps an over-repayment from hiding a later missed prayer.
 - **Hijri date:** `Intl.DateTimeFormat('en-u-ca-islamic-umalqura')`. Spike SP-4 verifies V8 support (near-certain, but cheap to confirm); fallback is the existing Python algorithm ported to TypeScript.
 - **Heatmaps and streaks:** computed from `prayer_log` (F-SALAH-07/11).
 - **Audio:** none. The app never plays adhan while the external stack owns alarms (F-SALAH-09).

@@ -215,6 +215,24 @@ export function SalahView({ localDate }: { localDate: string }) {
                     >
                       excused
                     </button>
+                    <button
+                      type="button"
+                      className="mini"
+                      onClick={() => void log(p.id, "late")}
+                      disabled={busy === p.id}
+                      title="Prayed late (outside the window)"
+                    >
+                      late
+                    </button>
+                    <button
+                      type="button"
+                      className="mini danger"
+                      onClick={() => void log(p.id, "missed")}
+                      disabled={busy === p.id}
+                      title="Missed — adds qada debt"
+                    >
+                      missed
+                    </button>
                   </>
                 )}
               </div>

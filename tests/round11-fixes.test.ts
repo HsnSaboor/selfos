@@ -109,3 +109,39 @@ describe("autostart entry", () => {
     }
   });
 });
+
+describe("round 13", () => {
+  it("keeps schedule versions immutable and takes effect tomorrow", async () => {
+    const { HabitsService } = await import("../src/main/modules/habits/service");
+    const { Db } = await import("../src/main/db/driver");
+    const { migrate } = await import("../src/main/db/migrate");
+    const db = Db.open(":memory:");
+    migrate(db);
+    const svc = new HabitsService(db);
+    const id = svc.create({ name: "Read", kind: "boolean", schedule: { kind: "daily" } }, "2026-11-02");
+    svc.changeSchedule(id, { kind: "weekdays", weekdays: [1, 2, 3] }, "2026-11-02");
+    const versions = db.all<{ effective_from: string; kind: string }>(
+      "SELECT effective_from, kind FROM habit_schedule WHERE habit_id = ? ORDER BY effective_from",
+      id,
+    );
+    expect(versions[0]?.kind).toBe("daily");
+    expect(versions[1]?.effective_from).toBe("2026-11-03");
+    expect(versions[1]?.kind).toBe("weekdays");
+    db.close();
+  });
+
+  it("clamps a qada repayment to the outstanding debt", async () => {
+    const { SalahService } = await import("../src/main/modules/salah/service");
+    const { Db } = await import("../src/main/db/driver");
+    const { migrate } = await import("../src/main/db/migrate");
+    const db = Db.open(":memory:");
+    migrate(db);
+    const svc = new SalahService(db);
+    await svc.log("fajr", { localDate: "2026-11-02", status: "missed" });
+    svc.repayQada("fajr", 5, "2026-11-02");
+    expect(svc.qada().total).toBe(0);
+    await svc.log("dhuhr", { localDate: "2026-11-02", status: "missed" });
+    expect(svc.qada().total).toBe(1);
+    db.close();
+  });
+});

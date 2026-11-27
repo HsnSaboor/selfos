@@ -78,6 +78,8 @@ function HabitRow({
   onArchive,
   onSkip,
   onSlip,
+  onSet,
+  onSchedule,
 }: {
   habit: HabitView;
   busy: boolean;
@@ -86,9 +88,13 @@ function HabitRow({
   onSkip: () => void;
   onSlip: () => void;
   onArchive: () => void;
+  onSet: (value: number) => void;
+  onSchedule: (kind: NewHabitInput["schedule"]["kind"]) => void;
 }) {
   const complete = isComplete(habit, habit.todayEntry);
   const countish = habit.kind === "count" || habit.kind === "duration";
+  const [entry, setEntry] = useState("");
+  const [timerStart, setTimerStart] = useState<number | null>(null);
 
   return (
     <div className={`habit-row${complete ? " complete" : ""}${habit.dueToday ? "" : " off-schedule"}`}>
@@ -105,6 +111,17 @@ function HabitRow({
       <div className="habit-main">
         <div className="habit-name">{habit.name}</div>
         <div className="habit-meta">
+          <select
+            className="input narrow"
+            value={habit.schedule?.kind ?? "daily"}
+            onChange={(e) => onSchedule(e.target.value as NewHabitInput["schedule"]["kind"])}
+            aria-label={`Schedule for ${habit.name}`}
+          >
+            <option value="daily">daily</option>
+            <option value="weekdays">weekdays</option>
+            <option value="times_per_week">×/week</option>
+            <option value="times_per_month">×/month</option>
+          </select>
           <span>{describeSchedule(habit.schedule)}</span>
           <span className="sep">·</span>
           <span>{statusLabel(habit)}</span>
@@ -125,6 +142,42 @@ function HabitRow({
             <button type="button" className="mini" onClick={() => onIncrement(1)} disabled={busy}>
               +
             </button>
+            <input
+              className="input narrow"
+              type="number"
+              min={0}
+              value={entry}
+              onChange={(e) => setEntry(e.target.value)}
+              placeholder="value"
+              aria-label={`Set ${habit.name} value`}
+            />
+            <button
+              type="button"
+              className="mini"
+              disabled={busy || entry === ""}
+              onClick={() => {
+                onSet(Number(entry));
+                setEntry("");
+              }}
+            >
+              set
+            </button>
+            {habit.kind === "duration" ? (
+              <button
+                type="button"
+                className="mini"
+                disabled={busy}
+                onClick={() => {
+                  if (timerStart === null) setTimerStart(Date.now());
+                  else {
+                    onIncrement(Math.max(1, Math.round((Date.now() - timerStart) / 60000)));
+                    setTimerStart(null);
+                  }
+                }}
+              >
+                {timerStart === null ? "timer" : "stop"}
+              </button>
+            ) : null}
           </>
         ) : null}
         {habit.kind === "avoid" ? (
@@ -170,6 +223,8 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
   const [target, setTarget] = useState("1");
   const [unit, setUnit] = useState("");
   const [perPeriod, setPerPeriod] = useState("3");
+  const [icon, setIcon] = useState("");
+  const [color, setColor] = useState("");
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -186,6 +241,8 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
       kind,
       unit: kind === "count" || kind === "duration" ? unit || null : null,
       target: kind === "count" || kind === "duration" ? Number(target) || 1 : null,
+      ...(icon.trim() ? { icon: icon.trim() } : {}),
+      ...(color ? { color } : {}),
       schedule: {
         kind: scheduleKind,
         weekdays: scheduleKind === "weekdays" ? weekdays : null,
@@ -287,6 +344,20 @@ function NewHabitForm({ onCreated }: { onCreated: () => void }) {
           </>
         ) : null}
 
+        <input
+          className="input narrow"
+          placeholder="icon"
+          value={icon}
+          onChange={(e) => setIcon(e.target.value)}
+          aria-label="Icon"
+        />
+        <input
+          className="input narrow"
+          type="color"
+          value={color || "#7daea3"}
+          onChange={(e) => setColor(e.target.value)}
+          aria-label="Colour"
+        />
         <button type="button" className="primary" onClick={() => void submit()} disabled={busy}>
           Add habit
         </button>
@@ -442,6 +513,25 @@ export function HabitsView({ localDate }: { localDate: string }) {
                   }),
                 )
               }
+              onSet={(v) =>
+                void act(h.id, () =>
+                  window.selfos.invoke("habits.log", {
+                    habitId: h.id,
+                    localDate: entryDate,
+                    value: v,
+                    status: v >= (h.target ?? 1) ? "done" : "partial",
+                  }),
+                )
+              }
+              onSchedule={(kind) =>
+                void act(h.id, () =>
+                  window.selfos.invoke("habits.changeSchedule", {
+                    habitId: h.id,
+                    effectiveFrom: entryDate,
+                    schedule: { kind },
+                  }),
+                )
+              }
               onArchive={() =>
                 void act(h.id, () =>
                   window.selfos.invoke("habits.archive", { habitId: h.id, archived: true }),
@@ -452,7 +542,8 @@ export function HabitsView({ localDate }: { localDate: string }) {
               <div className="habit-heat">
                 <Heatmap cells={heatmaps[h.id] ?? []} />
                 <span className="muted heat-note">
-                  last 12 weeks · 30-day completion {Math.round(h.completion30d * 100)}%
+                  last 12 weeks · 7d {Math.round(h.completion7d * 100)}% · 30d{" "}
+                  {Math.round(h.completion30d * 100)}% · 90d {Math.round(h.completion90d * 100)}%
                 </span>
               </div>
             ) : null}

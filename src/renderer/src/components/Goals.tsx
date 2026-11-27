@@ -95,6 +95,9 @@ function GoalCard({
       </div>
 
       {goal.description ? <p className="goal-desc">{goal.description}</p> : null}
+      {goal.source && goal.source !== "manual" ? (
+        <p className="muted panel-note">Tracks {goal.source} (manual entry in v1)</p>
+      ) : null}
 
       <div className="goal-numbers">
         <strong>
@@ -287,6 +290,7 @@ function NewGoalForm({
   const [start, setStart] = useState(today);
   const [due, setDue] = useState("");
   const [parent, setParent] = useState<number | "">("");
+  const [source, setSource] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -305,6 +309,7 @@ function NewGoalForm({
       startDate: start,
       targetDate: due || null,
       parentId: parent === "" ? null : parent,
+      ...(source.trim() ? { source: source.trim() } : {}),
     });
     setBusy(false);
     if (res.ok) {
@@ -314,6 +319,7 @@ function NewGoalForm({
       setUnit("");
       setDue("");
       setParent("");
+      setSource("");
       setError(null);
       onCreated();
     } else setError(res.error);
@@ -401,6 +407,15 @@ function NewGoalForm({
               ))}
           </select>
         </label>
+        <label className="field">
+          <span>Links to (habit or metric)</span>
+          <input
+            className="input"
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+            placeholder="e.g. reading:pages (optional)"
+          />
+        </label>
         <button
           type="button"
           className="primary"
@@ -450,7 +465,10 @@ export function GoalsView({ localDate }: { localDate: string }) {
   // implying it is the all-time total.
   const done = goals.filter((g) => g.status === "completed").length;
   // Only top-level goals get a card; children show through their parent's rollup.
-  const roots = goals.filter((g) => g.parentId === null);
+  // A child whose parent is not in the list (a completed parent filtered out by
+  // "show closed") must still render, or it is invisible (round-13).
+  const visibleIds = new Set(goals.map((g) => g.id));
+  const roots = goals.filter((g) => g.parentId === null || !visibleIds.has(g.parentId));
   const childrenOf = (id: number) => goals.filter((g) => g.parentId === id);
 
   return (

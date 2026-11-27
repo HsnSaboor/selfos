@@ -5,7 +5,7 @@
  * delegates. Nothing here stores a streak — it is always recomputed (D-03).
  */
 
-import { addDays } from "../../../shared/dates";
+import { addDays, localDateKey } from "../../../shared/dates";
 import { isComplete } from "../../../shared/habits";
 import type { Db } from "../../db/driver";
 import {
@@ -42,7 +42,9 @@ export interface HabitWithState extends HabitRow {
   schedule: ScheduleVersion | null;
   todayEntry: HabitEntry | null;
   streak: StreakResult;
+  completion7d: number;
   completion30d: number;
+  completion90d: number;
   dueToday: boolean;
 }
 
@@ -84,7 +86,9 @@ export class HabitsService {
         schedule,
         todayEntry,
         streak: computeStreak({ habit, versions, entries, today }),
+        completion7d: completionRate({ habit, versions, entries, today, lookbackDays: 7 }),
         completion30d: completionRate({ habit, versions, entries, today, lookbackDays: 30 }),
+        completion90d: completionRate({ habit, versions, entries, today, lookbackDays: 90 }),
         dueToday: this.#isDueToday(habit, schedule, today, entries),
       };
     });
@@ -314,9 +318,13 @@ export class HabitsService {
   }
 
   entries(habitId: number): HabitEntry[] {
+    // Bound the read: streak/heatmap need at most 400 days, and an unbounded
+    // scan grows with every year the user keeps the habit (round-13).
+    const since = addDays(localDateKey(new Date()), -400);
     const rows = this.#db.all<{ local_date: string; value: number; status: string }>(
-      "SELECT local_date, value, status FROM habit_entry WHERE habit_id = ? ORDER BY local_date",
+      "SELECT local_date, value, status FROM habit_entry WHERE habit_id = ? AND local_date >= ? ORDER BY local_date",
       habitId,
+      since,
     );
     return rows.map((r) => ({
       localDate: r.local_date,
@@ -343,7 +351,7 @@ export class HabitsService {
       from = addDays(from, 1);
       // A future version may already sit on that date; keep walking so no
       // version is ever overwritten (bounded, the calendar is finite).
-      for (let i = 0; i < 7 && occupied(from); i++) from = addDays(from, 1);
+      for (let i = 0; i < 366 && occupied(from); i++) from = addDays(from, 1);
     }
 
     this.#db.run(

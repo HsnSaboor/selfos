@@ -3,8 +3,9 @@
  *
  * Semantics, stated explicitly because they are easy to get subtly wrong:
  *
- *  - A **day** is satisfied when its entry is `done` or `partial` at the target,
- *    or when a linked source produced a completed entry.
+ *  - A **day** is satisfied when its entry is `done`, or `partial`/`count` at the
+ *    target (`isComplete` in `shared/habits.ts`). Linked-source completion is not
+ *    implemented in v1.
  *  - A **skipped** day neither breaks nor extends a streak. It is neutral.
  *  - A **slipped** day (avoidance habits) breaks the streak.
  *  - An **unscheduled** day is neutral, exactly like a skip.
@@ -251,8 +252,8 @@ export function completionRate(input: StreakInput): number {
 
 /**
  * Values for a calendar heatmap: one entry per day, with the state that day
- * contributed. Period schedules report their success on the period's last
- * recorded day so the heatmap stays meaningful.
+ * contributed. Every satisfying day is marked satisfied; period schedules are
+ * evaluated per-day here, not collapsed onto the period's last day.
  */
 export function heatmapDays(input: StreakInput, days: number): Array<{ date: string; state: DayState }> {
   const { habit, versions, today } = input;

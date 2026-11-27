@@ -216,7 +216,9 @@ export interface HabitView {
   schedule: HabitSchedule | null;
   todayEntry: { localDate: string; value: number; status: EntryStatus } | null;
   streak: { current: number; longest: number; unit: "days" | "weeks" | "months" };
+  completion7d: number;
   completion30d: number;
+  completion90d: number;
   dueToday: boolean;
   archivedAt: number | null;
 }
@@ -483,12 +485,16 @@ export interface GoalView {
   milestonesTotal: number;
   rollup: number | null;
   childCount: number;
+  /** Free-text link to a habit/module metric (F-GOAL-01), or "manual". */
+  source: string;
   contributions: GoalContributionView[];
 }
 
 export interface NewGoalInput {
   title: string;
   description?: string;
+  /** Optional habit/module metric this goal tracks (F-GOAL-01). */
+  source?: string;
   kind: GoalKindView;
   targetValue?: number | null;
   unit?: string | null;

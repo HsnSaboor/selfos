@@ -96,7 +96,7 @@ export class SalahService {
     // Sunrise comes from the same computation as the prayers; a second adhan
     // configuration here could disagree, and its old fallback invented 06:00,
     // which decides Fajr's on-time boundary (round-13).
-    const sunrise = times.sunrise ?? config.customTimes.sunrise ?? "06:00";
+    const sunrise = times.sunrise ?? computeTimes(config, new Date()).sunrise;
     return { starts, sunrise, fajrTomorrow: starts.fajr };
   }
 
@@ -209,7 +209,11 @@ export class SalahService {
   /** Record a make-up of a previously missed prayer. */
   repayQada(prayer: PrayerId, count = 1, localDate?: string): QadaSummary {
     if (!PRAYERS.includes(prayer)) throw new Error(`unknown prayer: ${prayer}`);
-    this.addQada(prayer, -Math.abs(count), localDate ?? localDateKey(new Date()));
+    // Clamp to the outstanding debt: an over-repayment would be silently
+    // swallowed by the per-prayer floor and a later missed prayer would net ≤0.
+    const outstanding = qadaDebt(this.qadaEvents()).byPrayer[prayer] ?? 0;
+    const repay = Math.min(Math.abs(count), outstanding);
+    if (repay > 0) this.addQada(prayer, -repay, localDate ?? localDateKey(new Date()));
     return qadaDebt(this.qadaEvents());
   }
 

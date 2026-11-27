@@ -12,6 +12,7 @@
  *  - Explicitly excused (travel/illness)→ `excused`, never debt
  *  - A missed prayer adds qada debt; a make-up repayment subtracts it.
  */
+import { minutesOfDay } from "../../../shared/dates";
 import { PRAYERS, type PrayerId } from "../../integrations/salah/bridge";
 
 export type PrayerStatus = "on_time" | "late" | "missed" | "excused";
@@ -51,18 +52,13 @@ export interface PrayerWindows {
   fajrTomorrow: string;
 }
 
-function minutesOf(hm: string): number {
-  const [h, m] = hm.split(":").map(Number) as [number, number];
-  return h * 60 + m;
-}
-
 /**
  * Classify a prayer logged at a given local minute-of-day.
  * `loggedAtMinutes` is minutes since local midnight; values past 1440 mean
  * after midnight (which matters for Isha).
  */
 export function classifyLog(prayer: PrayerId, loggedAtMinutes: number, windows: PrayerWindows): PrayerStatus {
-  const start = minutesOf(windows.starts[prayer]);
+  const start = minutesOfDay(windows.starts[prayer]);
   const end = windowEnd(prayer, windows);
 
   // Isha's window crosses midnight: normalize into a continuous range.
@@ -82,12 +78,12 @@ export function windowEnd(prayer: PrayerId, windows: PrayerWindows): number {
   const order: readonly PrayerId[] = PRAYERS;
   // Fajr ends at sunrise, which is not itself a prayer.
   if (prayer === "fajr") {
-    return minutesOf(windows.sunrise ?? windows.starts.dhuhr);
+    return minutesOfDay(windows.sunrise ?? windows.starts.dhuhr);
   }
   const idx = order.indexOf(prayer);
-  if (idx === order.length - 1) return minutesOf(windows.fajrTomorrow);
+  if (idx === order.length - 1) return minutesOfDay(windows.fajrTomorrow);
   const nextPrayer = order[idx + 1];
-  return nextPrayer ? minutesOf(windows.starts[nextPrayer]) : 1440;
+  return nextPrayer ? minutesOfDay(windows.starts[nextPrayer]) : 1440;
 }
 
 /**
@@ -99,7 +95,12 @@ export function settledPrayers(nowMinutes: number, windows: PrayerWindows): Pray
   const order: readonly PrayerId[] = PRAYERS;
   return order.filter((p) => {
     const end = windowEnd(p, windows);
-    if (p === "isha" && end < minutesOf(windows.starts.isha)) return nowMinutes >= end + 1440;
+    if (p === "isha" && end < minutesOfDay(windows.starts.isha)) {
+      // A fully elapsed day settles Isha; nowMinutes is capped at 1440, so the
+      // old `>= end + 1440` was never true for a past date (round-13).
+      if (nowMinutes >= 1440) return true;
+      return nowMinutes >= end + 1440;
+    }
     return nowMinutes >= end;
   });
 }
@@ -149,7 +150,7 @@ export function buildDayState(
 
   const prayers = order.map((id) => {
     const log = byPrayer.get(id) ?? null;
-    const start = minutesOf(windows.starts[id]);
+    const start = minutesOfDay(windows.starts[id]);
     let expectedStatus: PrayerStatus | "open" | "upcoming";
     if (log) expectedStatus = log.status;
     else if (settled.has(id)) expectedStatus = "missed";

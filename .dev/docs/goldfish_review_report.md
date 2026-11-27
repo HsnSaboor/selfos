@@ -2294,3 +2294,47 @@ distinct findings were verified against the code and fixed.
 | verifiers | M0 32/32, M2 29/29, M3 32/32, M4 32/32, M5 49/49, M6 48/48, M7 52/52, M8 39/39; M1 skipped (no Hyprland socket) |
 
 **Round 12 reviewer status:** all three reported. Not clean.
+
+---
+
+# Round 13 — habits, salah and goals
+
+Reviewers: `zoom_out` (8 Majors, 11 Nits), `design_critic` (8 Majors, 9 Nits),
+`codebase_details` (3 Majors, 7 Nits). All three reported; the round is **not
+clean**. Every finding was reproduced before fixing.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 260 | MAJOR | Schedule versions were rewritten: a same-day change moved the old version back one day, and a second change fell through to `ON CONFLICT … DO UPDATE` | FIXED — versions immutable; a change takes effect tomorrow (walking past occupied future dates) |
+| 261 | MAJOR | "Done today" had four definitions; count habits at target were satisfied for the streak but not the KPI/ring | FIXED — one `isComplete` in `shared/habits.ts` used by all four |
+| 262 | MAJOR | Two prayer-time computations; `sunriseFor` re-configured adhan and fabricated 06:00, which decides Fajr on-time | FIXED — `computeTimes` returns sunrise; the 06:00 default is gone |
+| 263 | MAJOR | A past day was judged with today's clock and windows | FIXED — `timesFor(date)`/`windowsFor(date)`; `day()`/`log()` pass the target date |
+| 264 | MAJOR | Goal roll-up stopped at one level and three-level trees could not be created | FIXED — parent uses `child.rollup`; any active goal can be a parent |
+| 265 | MAJOR | The header's Hijri date depended on whether Salah had been opened | FIXED — `lastHijri()` computes locally when uncached |
+| 266 | MAJOR | F-HABIT-10 backfill had no UI | FIXED — entry-date control (30-day window) |
+| 267 | MAJOR | Archived habits' heatmaps were computed, shipped and never drawn | FIXED — excluded by default; comment corrected |
+| 268 | MAJOR | An active child of a completed parent was invisible | FIXED — a child whose parent is filtered out renders as a root |
+| 269 | MAJOR | F-HABIT-01 icon/colour, F-HABIT-03 direct entry, F-HABIT-04 timer/minutes had no UI | FIXED — inputs added |
+| 270 | MAJOR | F-HABIT-09 only 30-day completion | FIXED — 7/30/90 exposed and rendered |
+| 271 | MAJOR | F-SALAH-03 late/missed could not be logged | FIXED — buttons added |
+| 272 | MAJOR | F-GOAL-01 metric link absent | FIXED (v1: free-text `source`, shown on the card; auto-sourcing recorded) |
+| 273 | MAJOR | `heatmapDays` docstring and streak header described unimplemented rules | FIXED |
+| 274 | MAJOR | STACK §4.2 goal enums, §7 pure-function API, §10 qada formula were wrong | FIXED |
+| 275 | NIT | Past-day Isha never settled | FIXED |
+| 276 | NIT | Qada floor could hide a new debt after over-repayment | FIXED — repayment clamped to outstanding |
+| 277 | NIT | `entries()` unbounded | FIXED — 400-day bound |
+| 278 | NIT | `minutesOf` duplicated | FIXED — `minutesOfDay` in shared/dates |
+| 279 | NIT | `increment()` unguarded for boolean/avoid | FIXED |
+| 280 | NIT | changeSchedule collision walk bounded to 7 | FIXED — 366 |
+| 281 | NIT | Salah 30-day streak cap, goal 50-row cap, 200-char title undocumented | FIXED — documented |
+| 282 | NIT | F-SALAH-07 weekly/monthly, F-GOAL-04/06, F-HABIT-11/13, C-6 editor | RECORDED/PARTIAL — C-6 editor added; the rest marked not implemented |
+
+## Round 13 verification
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` / `biome` | clean |
+| `vitest run` | **463 passed** (2 new) |
+| verifiers | M0 32, M2 29, M3 32, M4 32, M5 49, M6 48, M7 52, M8 39; M1 skipped (no Hyprland) |
+
+**Round 13 reviewer status:** all three reported. Not clean.
